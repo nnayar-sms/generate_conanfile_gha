@@ -497,9 +497,49 @@ jobs:
         
     - name: Install OSV tools
       run: |
-        # Install the OSV indexer-api-caller tool
-        go install github.com/google/osv-scanner/cmd/indexer-api-caller@latest
+        # Install Go if not already installed
+        if ! command -v go &> /dev/null; then
+          echo "Installing Go..."
+          wget -q https://golang.org/dl/go1.21.0.linux-amd64.tar.gz
+          sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
+          echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+          source ~/.bashrc
+        fi
+        
+        # Verify Go installation
+        go version
+        
+        # Try installing the OSV tools
+        echo "Attempting to install OSV tools..."
+        
+        # First try the main package
+        if ! go install github.com/google/osv-scanner@latest; then
+          echo "Failed to install osv-scanner, trying alternative installation method..."
+          # Try installing from source
+          git clone https://github.com/google/osv-scanner.git
+          cd osv-scanner
+          go install ./...
+          cd ..
+          rm -rf osv-scanner
+        fi
+        
+        # Verify the installation
+        if ! command -v osv-scanner &> /dev/null; then
+          echo "Error: osv-scanner installation failed"
+          exit 1
+        fi
+        
+        # Add Go bin to PATH
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+        
+        # Verify tools are available
+        echo "Installed tools:"
+        ls -l $(go env GOPATH)/bin/
+        
+        # Fallback to curl if indexer-api-caller is not available
+        if ! command -v indexer-api-caller &> /dev/null; then
+          echo "Warning: indexer-api-caller not found, will use curl as fallback"
+        fi
 
     - name: Generate Conanfile
       run: |
@@ -762,8 +802,16 @@ jobs:
                 echo "OSV API Payload for $DEP_NAME:"
                 cat "$PAYLOAD_FILE" | jq '.'
                 
-                # Use indexer-api-caller to make the API request
-                OSV_RESPONSE=$(indexer-api-caller determineversion -payload "$PAYLOAD_FILE")
+                # Try using indexer-api-caller if available, otherwise fall back to curl
+                if command -v indexer-api-caller &> /dev/null; then
+                  echo "Using indexer-api-caller for API request..."
+                  OSV_RESPONSE=$(indexer-api-caller determineversion -payload "$PAYLOAD_FILE")
+                else
+                  echo "Using curl as fallback for API request..."
+                  OSV_RESPONSE=$(curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
+                    -H "Content-Type: application/json" \
+                    -d "$(cat "$PAYLOAD_FILE")")
+                fi
                 
                 # Log the full API response
                 echo "OSV API Response for $DEP_NAME:"
