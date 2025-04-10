@@ -216,22 +216,6 @@ jobs:
         make
       continue-on-error: true
 
-    - name: Run tests
-      run: |
-        # Only attempt to run tests if the build directory exists and contains something
-        if [ -d "build" ] && [ "$(ls -A build)" ]; then
-          cd build
-          # Only run ctest if it's a CMake project
-          if [ -f "CTestTestfile.cmake" ]; then
-            ctest -C Release --output-on-failure || echo "Tests failed, continuing anyway"
-          else
-            echo "No CMake tests found, skipping test step"
-          fi
-        else
-          echo "Build directory empty or not created, skipping test step"
-        fi
-      continue-on-error: true
-
     - name: Collect all dependencies
       run: |
         # Get repository name
@@ -519,21 +503,33 @@ jobs:
         # Create conanfile.txt
         echo "[requires]" > ${REPO_NAME}-conanfile.txt
         
-        # Extract dependencies from system packages
+        # Extract system package dependencies
+        echo "# System Package Dependencies" >> ${REPO_NAME}-conanfile.txt
         dpkg-query -W -f='${binary:Package}\n' | grep -E '^lib.*-dev$' | sed 's/-dev$//' | while read -r pkg; do
-          # Map common system packages to Conan packages
           case $pkg in
             libboost*)
-              echo "boost/$(dpkg-query -W -f='${Version}' libboost-dev | cut -d. -f1-2)" >> ${REPO_NAME}-conanfile.txt
+              VERSION=$(dpkg-query -W -f='${Version}' libboost-dev | cut -d. -f1-2)
+              echo "boost/${VERSION}" >> ${REPO_NAME}-conanfile.txt
               ;;
             libzlib*)
-              echo "zlib/$(dpkg-query -W -f='${Version}' zlib1g-dev | cut -d- -f1)" >> ${REPO_NAME}-conanfile.txt
+              VERSION=$(dpkg-query -W -f='${Version}' zlib1g-dev | cut -d- -f1)
+              echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
               ;;
             libssl*)
-              echo "openssl/$(dpkg-query -W -f='${Version}' libssl-dev | cut -d- -f1)" >> ${REPO_NAME}-conanfile.txt
+              VERSION=$(dpkg-query -W -f='${Version}' libssl-dev | cut -d- -f1)
+              echo "openssl/${VERSION}" >> ${REPO_NAME}-conanfile.txt
               ;;
             libcurl*)
-              echo "libcurl/$(dpkg-query -W -f='${Version}' libcurl4-openssl-dev | cut -d- -f1)" >> ${REPO_NAME}-conanfile.txt
+              VERSION=$(dpkg-query -W -f='${Version}' libcurl4-openssl-dev | cut -d- -f1)
+              echo "libcurl/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libmysqlclient*)
+              VERSION=$(dpkg-query -W -f='${Version}' libmysqlclient-dev | cut -d- -f1)
+              echo "mysqlclient/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libpq*)
+              VERSION=$(dpkg-query -W -f='${Version}' libpq-dev | cut -d- -f1)
+              echo "pq/${VERSION}" >> ${REPO_NAME}-conanfile.txt
               ;;
             *)
               # Try to map other packages
@@ -546,25 +542,7 @@ jobs:
           esac
         done
         
-        # Add vendored dependencies
-        echo "" >> ${REPO_NAME}-conanfile.txt
-        echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
-        
-        # Extract vendored dependencies from the report
-        grep -A 1 "Found.*library" ${REPO_NAME}-dependency-report.md | while read -r line; do
-          if [[ $line == *"Found"* ]]; then
-            LIB_NAME=$(echo $line | sed 's/Found //' | sed 's/ library//' | sed 's/ in.*//')
-            # Try to find version
-            VERSION=$(grep -A 5 "$line" ${REPO_NAME}-dependency-report.md | grep -E "version|VERSION" | head -n 1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
-            if [ ! -z "$VERSION" ]; then
-              echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
-            else
-              echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
-            fi
-          fi
-        done
-        
-        # Add CMake dependencies
+        # Extract CMake dependencies
         if [ -f "build/CMakeCache.txt" ]; then
           echo "" >> ${REPO_NAME}-conanfile.txt
           echo "# CMake Dependencies" >> ${REPO_NAME}-conanfile.txt
@@ -575,6 +553,30 @@ jobs:
               echo "${PKG}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
             fi
           done
+        fi
+        
+        # Extract vendored dependencies from the report
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
+        # Look for library mentions in the report
+        grep -A 1 "Found.*library" ${REPO_NAME}-dependency-report.md | while read -r line; do
+          if [[ $line == *"Found"* ]]; then
+            LIB_NAME=$(echo $line | sed 's/Found //' | sed 's/ library//' | sed 's/ in.*//')
+            # Try to find version in the next few lines
+            VERSION=$(grep -A 5 "$line" ${REPO_NAME}-dependency-report.md | grep -E "version|VERSION" | head -n 1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
+            if [ ! -z "$VERSION" ]; then
+              echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+            else
+              echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+            fi
+          fi
+        done
+        
+        # Extract Conan dependencies if they exist
+        if [ -f "conanfile.txt" ]; then
+          echo "" >> ${REPO_NAME}-conanfile.txt
+          echo "# Original Conan Dependencies" >> ${REPO_NAME}-conanfile.txt
+          grep -v "^#" conanfile.txt | grep -v "^$" >> ${REPO_NAME}-conanfile.txt
         fi
         
         # Add build requirements
