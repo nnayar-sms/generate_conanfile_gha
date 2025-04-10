@@ -495,6 +495,12 @@ jobs:
         echo "Dependency report generated at ${REPO_NAME}-dependency-report.md"
       continue-on-error: true
         
+    - name: Install OSV tools
+      run: |
+        # Install the OSV indexer-api-caller tool
+        go install github.com/google/osv-scanner/cmd/indexer-api-caller@latest
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
     - name: Generate Conanfile
       run: |
         # Get repository name
@@ -744,13 +750,27 @@ jobs:
                 # Try OSV determineversion API first
                 echo "Attempting to determine version using OSV API for $DEP_NAME..."
                 # Store the API response in a variable for detailed logging
-                OSV_RESPONSE=$(find "$SUBDIR" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
-                  -H "Content-Type: application/json" \
-                  -d "{\"name\":\"$DEP_NAME\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}")
+                # Limit the number of files to hash to avoid exceeding the API limit
+                FILES_TO_HASH=$(find "$SUBDIR" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) | head -n 50)
+                HASHES=$(echo "$FILES_TO_HASH" | xargs md5sum | sort | cut -d' ' -f1 | tr '\n' ' ')
+                
+                # Create a temporary file for the payload
+                PAYLOAD_FILE=$(mktemp)
+                echo "{\"name\":\"$DEP_NAME\",\"file_hashes\":[{\"hash\":\"$HASHES\",\"file_path\":\"\"}]}" > "$PAYLOAD_FILE"
+                
+                # Log the payload structure
+                echo "OSV API Payload for $DEP_NAME:"
+                cat "$PAYLOAD_FILE" | jq '.'
+                
+                # Use indexer-api-caller to make the API request
+                OSV_RESPONSE=$(indexer-api-caller determineversion -payload "$PAYLOAD_FILE")
                 
                 # Log the full API response
                 echo "OSV API Response for $DEP_NAME:"
                 echo "$OSV_RESPONSE" | jq '.'
+                
+                # Clean up the temporary file
+                rm "$PAYLOAD_FILE"
                 
                 # Extract version from response
                 OSV_VERSION=$(echo "$OSV_RESPONSE" | jq -r '.matches[0].repo_info.version // empty')
