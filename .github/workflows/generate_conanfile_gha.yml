@@ -752,19 +752,27 @@ jobs:
                   VERSION=$OSV_VERSION
                   VERSION_SOURCE="OSV API"
                 else
-                  # Fallback to traditional version detection
-                  VERSION=$(find "$SUBDIR" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "VERSION" -o -name "version.txt" -o -name "README" -o -name "CHANGELOG" \) -exec grep -E "version|VERSION|AC_INIT|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                  if [ ! -z "$VERSION" ]; then
-                    VERSION_SOURCE="File-based detection (headers/CMakeLists.txt/VERSION)"
+                  # Try to get version from git history
+                  echo "Attempting to determine version from git history for $DEP_NAME..."
+                  GIT_INFO=$(git log -n 1 --pretty=format:"%h|%H|%s|%an|%ad" -- "$SUBDIR" 2>/dev/null)
+                  if [ ! -z "$GIT_INFO" ]; then
+                    # Split the git info into components
+                    IFS='|' read -r SHORT_HASH FULL_HASH SUBJECT AUTHOR DATE <<< "$GIT_INFO"
+                    
+                    # Log the detailed git information
+                    echo "Git commit information for $DEP_NAME:"
+                    echo "  Abbreviated Hash: $SHORT_HASH"
+                    echo "  Full Hash: $FULL_HASH"
+                    echo "  Subject: $SUBJECT"
+                    echo "  Author: $AUTHOR"
+                    echo "  Date: $DATE"
+                    
+                    VERSION=$SHORT_HASH
+                    VERSION_SOURCE="Git commit hash"
                   else
-                    # Try to get version from git history
-                    VERSION=$(git log -n 1 --pretty=format:"%h" -- "$SUBDIR" 2>/dev/null)
-                    if [ ! -z "$VERSION" ]; then
-                      VERSION_SOURCE="Git commit hash"
-                    else
-                      VERSION="1.0.0"
-                      VERSION_SOURCE="Default version"
-                    fi
+                    echo "No git history found for $DEP_NAME"
+                    VERSION="1.0.0"
+                    VERSION_SOURCE="Default version"
                   fi
                 fi
                 echo "${DEP_NAME}/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
