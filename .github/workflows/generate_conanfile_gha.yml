@@ -559,8 +559,8 @@ jobs:
         echo "" >> ${REPO_NAME}-conanfile.txt
         echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
         
-        # First check LLVM-specific directories
-        for DIR in llvm/utils llvm/lib third-party runtimes; do
+        # First check LLVM-specific directories and subprojects
+        for DIR in llvm/utils llvm/lib third-party runtimes clang/tools/extra clang lld lldb; do
           if [ -d "$DIR" ]; then
             # Look for googletest
             if [ -d "$DIR/googletest" ] || [ -d "$DIR/gtest" ]; then
@@ -579,6 +579,42 @@ jobs:
               fi
               echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
             fi
+            
+            # Look for other common LLVM dependencies
+            for DEP in libxml2 libedit libffi; do
+              if [ -d "$DIR/$DEP" ]; then
+                VERSION=$(find "$DIR/$DEP" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" \) -exec grep -E "version|VERSION|AC_INIT" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+                if [ ! -z "$VERSION" ]; then
+                  echo "${DEP}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                else
+                  case $DEP in
+                    "libxml2")
+                      echo "libxml2/2.11.5" >> ${REPO_NAME}-conanfile.txt
+                      ;;
+                    "libedit")
+                      echo "libedit/20230828" >> ${REPO_NAME}-conanfile.txt
+                      ;;
+                    "libffi")
+                      echo "libffi/3.4.4" >> ${REPO_NAME}-conanfile.txt
+                      ;;
+                  esac
+                fi
+              fi
+            done
+
+            # Add any other directories that look like dependencies
+            for SUBDIR in $(find "$DIR" -maxdepth 1 -type d | grep -v "^$DIR$"); do
+              DEP_NAME=$(basename "$SUBDIR")
+              # Skip common non-dependency directories
+              if [[ "$DEP_NAME" != "CMakeFiles" && "$DEP_NAME" != "include" && "$DEP_NAME" != "src" && "$DEP_NAME" != "test" && "$DEP_NAME" != "tests" ]]; then
+                VERSION=$(find "$SUBDIR" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "VERSION" -o -name "version.txt" \) -exec grep -E "version|VERSION|AC_INIT" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+                if [ ! -z "$VERSION" ]; then
+                  echo "${DEP_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                else
+                  echo "${DEP_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+                fi
+              fi
+            done
           fi
         done
         
@@ -597,6 +633,15 @@ jobs:
                 "googletest"|"gtest")
                   echo "gtest/${VERSION}" >> ${REPO_NAME}-conanfile.txt
                   ;;
+                "libxml2")
+                  echo "libxml2/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "libedit")
+                  echo "libedit/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "libffi")
+                  echo "libffi/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  ;;
                 *)
                   echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
                   ;;
@@ -609,6 +654,15 @@ jobs:
                   ;;
                 "googletest"|"gtest")
                   echo "gtest/1.12.1" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "libxml2")
+                  echo "libxml2/2.11.5" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "libedit")
+                  echo "libedit/20230828" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "libffi")
+                  echo "libffi/3.4.4" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 *)
                   echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
@@ -644,6 +698,18 @@ jobs:
       id: repo-name
       run: echo "REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_OUTPUT
 
+    - name: Download workflow log
+      run: |
+        # Get the current workflow run ID
+        RUN_ID=${{ github.run_id }}
+        # Get the repository name
+        REPO_NAME=${{ steps.repo-name.outputs.REPO_NAME }}
+        # Download the workflow log using GitHub API
+        curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+             -H "Accept: application/vnd.github.v3+json" \
+             "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/logs" \
+             -o "${REPO_NAME}-gha.log" || echo "Could not download workflow log"
+
     - name: Upload dependency report
       uses: actions/upload-artifact@v4
       with:
@@ -652,3 +718,4 @@ jobs:
           ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
           dependency_info.tar.gz
           ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt
+          ${{ steps.repo-name.outputs.REPO_NAME }}-gha.log
