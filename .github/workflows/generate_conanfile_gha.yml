@@ -517,26 +517,16 @@ jobs:
         echo '#!/bin/bash
         # Get the absolute path of the current directory
         WORK_DIR=$(pwd)
-        # Special handling for --version flag
-        if [ "$1" = "--version" ]; then
-          docker run --rm ghcr.io/google/osv-scanner:latest osv-scanner --version
-        else
-          # Run the container with the current directory mounted
-          docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest osv-scanner "$@"
-        fi' > osv-scanner
+        # Run the container with the current directory mounted
+        docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest osv-scanner "$@"' > osv-scanner
         chmod +x osv-scanner
         
         # Create a wrapper script for indexer-api-caller
         echo '#!/bin/bash
         # Get the absolute path of the current directory
         WORK_DIR=$(pwd)
-        # Special handling for --help flag
-        if [ "$1" = "--help" ]; then
-          docker run --rm ghcr.io/google/osv-scanner:latest indexer-api-caller --help
-        else
-          # Run the container with the current directory mounted
-          docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"
-        fi' > indexer-api-caller
+        # Run the container with the current directory mounted
+        docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"' > indexer-api-caller
         chmod +x indexer-api-caller
         
         # Add the current directory to PATH
@@ -545,22 +535,10 @@ jobs:
         # Verify the tools are available
         echo "Verifying OSV tools..."
         # Test osv-scanner with a simple command
-        if ! ./osv-scanner --version > /dev/null 2>&1; then
-          echo "Error: osv-scanner verification failed"
-          # Try running with full path
-          docker run --rm ghcr.io/google/osv-scanner:latest osv-scanner --version
-        else
-          echo "osv-scanner verification successful"
-        fi
+        docker run --rm ghcr.io/google/osv-scanner:latest osv-scanner --version
         
         # Test indexer-api-caller with a simple command
-        if ! ./indexer-api-caller --help > /dev/null 2>&1; then
-          echo "Error: indexer-api-caller verification failed"
-          # Try running with full path
-          docker run --rm ghcr.io/google/osv-scanner:latest indexer-api-caller --help
-        else
-          echo "indexer-api-caller verification successful"
-        fi
+        docker run --rm ghcr.io/google/osv-scanner:latest indexer-api-caller --help
         
         # Print environment for debugging
         echo "Environment variables:"
