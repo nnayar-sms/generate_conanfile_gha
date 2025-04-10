@@ -234,233 +234,236 @@ jobs:
 
     - name: Collect all dependencies
       run: |
-        echo "# Dependency Report" > dependency_report.md
-        echo "Generated on $(date)" >> dependency_report.md
-        echo "" >> dependency_report.md
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "# Dependency Report" > ${REPO_NAME}-dependency-report.md
+        echo "Generated on $(date)" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
         
         # Create directory to store detailed dependency information
         mkdir -p dependency_info
         
-        echo "## System Dependencies" >> dependency_report.md
-        echo "Listing installed apt packages:" >> dependency_report.md
-        echo '```' >> dependency_report.md
-        dpkg-query -W -f='${binary:Package} ${Version}\n' | sort >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "## System Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo "Listing installed apt packages:" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        dpkg-query -W -f='${binary:Package} ${Version}\n' | sort >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Git Submodules Analysis
-        echo "" >> dependency_report.md
-        echo "## Git Submodules" >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Git Submodules" >> ${REPO_NAME}-dependency-report.md
         if [ -f ".gitmodules" ]; then
-          echo "### Detected Git Submodules" >> dependency_report.md
-          echo '```' >> dependency_report.md
-          cat .gitmodules >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "### Detected Git Submodules" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          cat .gitmodules >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           
-          echo "" >> dependency_report.md
-          echo "### Submodule Versions (Commit Hashes)" >> dependency_report.md
-          echo '```' >> dependency_report.md
-          git submodule status >> dependency_report.md 2>/dev/null || echo "Could not get submodule status" >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Submodule Versions (Commit Hashes)" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          git submodule status >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "Could not get submodule status" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           
           # Try to get more detailed information from each submodule
-          echo "" >> dependency_report.md
-          echo "### Detailed Submodule Information" >> dependency_report.md
-          echo '```' >> dependency_report.md
-          git submodule foreach 'echo "Submodule: $name"; git log -n 1 --pretty=format:"%h %s %ad" --date=short; echo ""; if [ -f "VERSION" ]; then echo "VERSION file: $(cat VERSION)"; fi; if [ -f "version.txt" ]; then echo "version.txt: $(cat version.txt)"; fi; echo ""' 2>/dev/null || echo "Could not get detailed submodule info" >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Detailed Submodule Information" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          git submodule foreach 'echo "Submodule: $name"; git log -n 1 --pretty=format:"%h %s %ad" --date=short; echo ""; if [ -f "VERSION" ]; then echo "VERSION file: $(cat VERSION)"; fi; if [ -f "version.txt" ]; then echo "version.txt: $(cat version.txt)"; fi; echo ""' 2>/dev/null || echo "Could not get detailed submodule info" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
         else
-          echo "No .gitmodules file found. Repository does not use git submodules." >> dependency_report.md
+          echo "No .gitmodules file found. Repository does not use git submodules." >> ${REPO_NAME}-dependency-report.md
         fi
         
         # Vendored Dependencies Analysis
-        echo "" >> dependency_report.md
-        echo "## Vendored Dependencies" >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Vendored Dependencies" >> ${REPO_NAME}-dependency-report.md
         
         # Common directories where dependencies are vendored
-        echo "### Common Vendored Directories" >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "### Common Vendored Directories" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         # Add LLVM-specific patterns
         for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
           if [ -d "$DIR" ]; then
-            echo "Found potential vendored directory: $DIR" >> dependency_report.md
-            echo "Contents:" >> dependency_report.md
-            ls -la "$DIR" >> dependency_report.md
-            echo "" >> dependency_report.md
+            echo "Found potential vendored directory: $DIR" >> ${REPO_NAME}-dependency-report.md
+            echo "Contents:" >> ${REPO_NAME}-dependency-report.md
+            ls -la "$DIR" >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
             
             # Special handling for LLVM libraries
             if [[ "$DIR" == "llvm/utils" ]] || [[ "$DIR" == "llvm/lib" ]] || [[ "$DIR" == "third-party" ]] || [[ "$DIR" == "runtimes" ]]; then
-              echo "LLVM library directory detected: $DIR" >> dependency_report.md
+              echo "LLVM library directory detected: $DIR" >> ${REPO_NAME}-dependency-report.md
               
               # Look for googletest
               if [ -d "$DIR/googletest" ] || [ -d "$DIR/gtest" ]; then
-                echo "Found googletest in $DIR" >> dependency_report.md
+                echo "Found googletest in $DIR" >> ${REPO_NAME}-dependency-report.md
                 # Look for version information
                 find "$DIR/googletest" "$DIR/gtest" -name "CMakeLists.txt" -o -name "README.md" | while read -r file; do
                   if [ -f "$file" ]; then
-                    echo "Version information from $file:" >> dependency_report.md
-                    grep -i -E "version|release" "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
+                    echo "Version information from $file:" >> ${REPO_NAME}-dependency-report.md
+                    grep -i -E "version|release" "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version info found" >> ${REPO_NAME}-dependency-report.md
                   fi
                 done
               fi
               
               # Look for zlib
               if [ -d "$DIR/zlib" ]; then
-                echo "Found zlib in $DIR" >> dependency_report.md
+                echo "Found zlib in $DIR" >> ${REPO_NAME}-dependency-report.md
                 # Look for version information
                 if [ -f "$DIR/zlib/zlib.h" ]; then
-                  echo "Version information from zlib.h:" >> dependency_report.md
-                  grep -E '#define.*VERSION|version|ZLIB_VERSION' "$DIR/zlib/zlib.h" >> dependency_report.md 2>/dev/null || echo "No version defines found" >> dependency_report.md
+                  echo "Version information from zlib.h:" >> ${REPO_NAME}-dependency-report.md
+                  grep -E '#define.*VERSION|version|ZLIB_VERSION' "$DIR/zlib/zlib.h" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version defines found" >> ${REPO_NAME}-dependency-report.md
                 fi
               fi
             fi
           fi
         done
-        echo '```' >> dependency_report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Look for LLVM-specific dependencies
-        echo "" >> dependency_report.md
-        echo "### LLVM-Specific Dependencies" >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "### LLVM-Specific Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         # Look for common LLVM dependencies
         for DEP in googletest gtest zlib; do
           if [ -d "$DEP" ] || [ -d "lib$DEP" ]; then
-            echo "Found $DEP library" >> dependency_report.md
+            echo "Found $DEP library" >> ${REPO_NAME}-dependency-report.md
             # Try to find version information
             find . -path "*/$DEP/*" -o -path "*/lib$DEP/*" | grep -E 'version\.h|VERSION|version\.txt|README|CHANGELOG|CMakeLists.txt' | while read -r file; do
               if [ -f "$file" ]; then
-                echo "Version information from $file:" >> dependency_report.md
+                echo "Version information from $file:" >> ${REPO_NAME}-dependency-report.md
                 if [[ "$file" == *"version.h"* ]]; then
-                  grep -E '#define.*VERSION|version|RELEASE' "$file" >> dependency_report.md 2>/dev/null || echo "No version defines found" >> dependency_report.md
+                  grep -E '#define.*VERSION|version|RELEASE' "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version defines found" >> ${REPO_NAME}-dependency-report.md
                 elif [[ "$file" == *"CMakeLists.txt"* ]]; then
-                  grep -i -E "version|project" "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
+                  grep -i -E "version|project" "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version info found" >> ${REPO_NAME}-dependency-report.md
                 else
-                  head -n 20 "$file" | grep -i -E "version|release" >> dependency_report.md 2>/dev/null || echo "No obvious version info in header" >> dependency_report.md
+                  head -n 20 "$file" | grep -i -E "version|release" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No obvious version info in header" >> ${REPO_NAME}-dependency-report.md
                 fi
               fi
             done
           fi
         done
-        echo '```' >> dependency_report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Install and use OSV scanner for detecting versions of vendored code, if available
-        echo "" >> dependency_report.md
-        echo "### OSV Version Detection" >> dependency_report.md
-        echo '```' >> dependency_report.md
-        python3 -m pip install --user osv 2>/dev/null || echo "Could not install OSV scanner" >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "### OSV Version Detection" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        python3 -m pip install --user osv 2>/dev/null || echo "Could not install OSV scanner" >> ${REPO_NAME}-dependency-report.md
         if command -v osv-scanner &> /dev/null; then
-          echo "Running OSV scanner to detect vendored package versions..." >> dependency_report.md
-          osv-scanner scan --recursive . >> dependency_report.md 2>/dev/null || echo "OSV scanner failed or found no results" >> dependency_report.md
+          echo "Running OSV scanner to detect vendored package versions..." >> ${REPO_NAME}-dependency-report.md
+          osv-scanner scan --recursive . >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "OSV scanner failed or found no results" >> ${REPO_NAME}-dependency-report.md
         else
-          echo "OSV scanner not available. Could not scan for vendored package versions." >> dependency_report.md
+          echo "OSV scanner not available. Could not scan for vendored package versions." >> ${REPO_NAME}-dependency-report.md
         fi
-        echo '```' >> dependency_report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Look for version information in vendored directories
-        echo "" >> dependency_report.md
-        echo "### Version Information in Vendored Code" >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "### Version Information in Vendored Code" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         # Search for version files, headers and other common version indicators
         find . -path "*/vendor/*" -o -path "*/third_party/*" -o -path "*/external/*" -o -path "*/ThirdParty/*" -o -path "*/deps/*" | grep -E 'version\.h|VERSION|version\.txt|package\.json|setup\.py|\.gemspec|README|CHANGELOG|LICENSE' | while read -r file; do
           if [ -f "$file" ]; then
-            echo "Examining $file for version information:" >> dependency_report.md
+            echo "Examining $file for version information:" >> ${REPO_NAME}-dependency-report.md
             # Extract version information using various patterns
             if [[ "$file" == *"version.h"* ]]; then
-              grep -E '#define.*VERSION|version|RELEASE' "$file" >> dependency_report.md 2>/dev/null || echo "No version defines found" >> dependency_report.md
+              grep -E '#define.*VERSION|version|RELEASE' "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version defines found" >> ${REPO_NAME}-dependency-report.md
             elif [[ "$file" == *"package.json"* ]]; then
-              grep -E '"version"|"name"' "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
+              grep -E '"version"|"name"' "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version info found" >> ${REPO_NAME}-dependency-report.md
             elif [[ "$file" == *"setup.py"* ]]; then
-              grep -E "version|name" "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
+              grep -E "version|name" "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version info found" >> ${REPO_NAME}-dependency-report.md
             elif [[ "$file" == *".gemspec"* ]]; then
-              grep -E "version|name" "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
+              grep -E "version|name" "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version info found" >> ${REPO_NAME}-dependency-report.md
             elif [[ "$file" == *"VERSION"* || "$file" == *"version.txt"* ]]; then
-              cat "$file" >> dependency_report.md 2>/dev/null || echo "Could not read file" >> dependency_report.md
+              cat "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "Could not read file" >> ${REPO_NAME}-dependency-report.md
             else
               # For README, LICENSE, etc. just look for version mentions
-              head -n 20 "$file" | grep -i -E "version|release" >> dependency_report.md 2>/dev/null || echo "No obvious version info in header" >> dependency_report.md
+              head -n 20 "$file" | grep -i -E "version|release" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No obvious version info in header" >> ${REPO_NAME}-dependency-report.md
             fi
-            echo "" >> dependency_report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
           fi
         done
-        echo '```' >> dependency_report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Use git history on vendored directories to find when they were last updated
-        echo "" >> dependency_report.md
-        echo "### Git History for Vendored Directories" >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "### Git History for Vendored Directories" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty; do
           if [ -d "$DIR" ]; then
-            echo "Git history for $DIR:" >> dependency_report.md
-            git log -n 3 --pretty=format:"%h %s %ad" --date=short -- "$DIR" >> dependency_report.md 2>/dev/null || echo "Could not get git history" >> dependency_report.md
-            echo "" >> dependency_report.md
+            echo "Git history for $DIR:" >> ${REPO_NAME}-dependency-report.md
+            git log -n 3 --pretty=format:"%h %s %ad" --date=short -- "$DIR" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "Could not get git history" >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
             
             # Check commits for specific directories inside vendored dirs
             SUBDIRS=$(find "$DIR" -maxdepth 1 -type d | tail -n +2)
             for SUBDIR in $SUBDIRS; do
               if [ -d "$SUBDIR" ]; then
-                echo "Last commit for $SUBDIR:" >> dependency_report.md
-                git log -n 1 --pretty=format:"%h %s %ad" --date=short -- "$SUBDIR" >> dependency_report.md 2>/dev/null || echo "Could not get git history" >> dependency_report.md
-                echo "" >> dependency_report.md
+                echo "Last commit for $SUBDIR:" >> ${REPO_NAME}-dependency-report.md
+                git log -n 1 --pretty=format:"%h %s %ad" --date=short -- "$SUBDIR" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "Could not get git history" >> ${REPO_NAME}-dependency-report.md
+                echo "" >> ${REPO_NAME}-dependency-report.md
               fi
             done
           fi
         done
-        echo '```' >> dependency_report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # CMake Dependencies section after the vendored dependencies analysis
-        echo "" >> dependency_report.md
-        echo "## CMake Dependencies" >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
         # Find all CMakeLists.txt files in the project, not just in the root
         CMAKE_FILES=$(find . -name "CMakeLists.txt" -not -path "*/build/*" -not -path "*/\.*")
         if [ ! -z "$CMAKE_FILES" ]; then
-          echo "### Direct CMake Dependencies" >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "### Direct CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           # Extract and document all find_package and pkg_check_modules calls more thoroughly
           for CMAKE_FILE in $CMAKE_FILES; do
-            echo "File: $CMAKE_FILE" >> dependency_report.md
+            echo "File: $CMAKE_FILE" >> ${REPO_NAME}-dependency-report.md
             {
               grep -n "find_package" "$CMAKE_FILE" || echo "No find_package found"
               grep -n "pkg_check_modules" "$CMAKE_FILE" || echo "No pkg_check_modules found"
-            } >> dependency_report.md
-            echo "" >> dependency_report.md
+            } >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
           done
-          echo '```' >> dependency_report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           
           # Try to get actual versions from CMake cache if build has run
           if [ -f "build/CMakeCache.txt" ]; then
-            echo "" >> dependency_report.md
-            echo "### CMake Cache - Dependency Versions" >> dependency_report.md
-            echo '```' >> dependency_report.md
-            grep -E "_VERSION|_FOUND" build/CMakeCache.txt | sort >> dependency_report.md
-            echo '```' >> dependency_report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+            echo "### CMake Cache - Dependency Versions" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            grep -E "_VERSION|_FOUND" build/CMakeCache.txt | sort >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
             
             # Save detailed cmake info
             cp build/CMakeCache.txt dependency_info/
             [ -f build/compile_commands.json ] && cp build/compile_commands.json dependency_info/
           fi
         else
-          echo "No CMakeLists.txt files found in the project." >> dependency_report.md
+          echo "No CMakeLists.txt files found in the project." >> ${REPO_NAME}-dependency-report.md
         fi
         
         # Conan dependencies
         if [ -f "conanfile.txt" ] || [ -f "conanfile.py" ]; then
-          echo "" >> dependency_report.md
-          echo "## Conan Dependencies" >> dependency_report.md
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "## Conan Dependencies" >> ${REPO_NAME}-dependency-report.md
           
-          echo "### Conan Direct Dependencies" >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "### Conan Direct Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           if [ -f "conanfile.txt" ]; then
-            cat conanfile.txt >> dependency_report.md
+            cat conanfile.txt >> ${REPO_NAME}-dependency-report.md
           else
-            cat conanfile.py >> dependency_report.md
+            cat conanfile.py >> ${REPO_NAME}-dependency-report.md
           fi
-          echo '```' >> dependency_report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           
-          echo "" >> dependency_report.md
-          echo "### Conan Dependency Graph" >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Conan Dependency Graph" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           # Try to run conan info but don't fail if it doesn't work
-          (cd build && conan info .. 2>/dev/null) >> dependency_report.md || echo "Could not generate Conan info" >> dependency_report.md
-          echo '```' >> dependency_report.md
+          (cd build && conan info .. 2>/dev/null) >> ${REPO_NAME}-dependency-report.md || echo "Could not generate Conan info" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           
           # Get Conan lock file if available
           [ -f "build/conanbuildinfo.txt" ] && cp build/conanbuildinfo.txt dependency_info/
@@ -469,43 +472,124 @@ jobs:
         
         # vcpkg dependencies
         if [ -f "vcpkg.json" ]; then
-          echo "" >> dependency_report.md
-          echo "## vcpkg Dependencies" >> dependency_report.md
-          echo "### vcpkg Direct Dependencies" >> dependency_report.md
-          echo '```json' >> dependency_report.md
-          cat vcpkg.json >> dependency_report.md
-          echo '```' >> dependency_report.md
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "## vcpkg Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo "### vcpkg Direct Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```json' >> ${REPO_NAME}-dependency-report.md
+          cat vcpkg.json >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
           
           # If using vcpkg with CMake, try to extract more info
           if [ -d "build/vcpkg_installed" ]; then
-            echo "" >> dependency_report.md
-            echo "### Installed vcpkg Packages" >> dependency_report.md
-            echo '```' >> dependency_report.md
-            find build/vcpkg_installed -name "CONTROL" -o -name "vcpkg_abi_info.txt" | xargs cat 2>/dev/null >> dependency_report.md || echo "No detailed vcpkg info found" >> dependency_report.md
-            echo '```' >> dependency_report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+            echo "### Installed vcpkg Packages" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            find build/vcpkg_installed -name "CONTROL" -o -name "vcpkg_abi_info.txt" | xargs cat 2>/dev/null >> ${REPO_NAME}-dependency-report.md || echo "No detailed vcpkg info found" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
           fi
         fi
         
         # Look for typical C/C++ dependency patterns in source code
-        echo "" >> dependency_report.md
-        echo "## Source Code Analysis" >> dependency_report.md
-        echo "### Include Statements" >> dependency_report.md
-        echo '```' >> dependency_report.md
-        find . -type f -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" | xargs grep -l "#include" 2>/dev/null | head -n 50 | xargs grep "#include" 2>/dev/null | sort | uniq -c | sort -nr >> dependency_report.md 2>/dev/null || echo "No C/C++ includes found" >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Source Code Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo "### Include Statements" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        find . -type f -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" | xargs grep -l "#include" 2>/dev/null | head -n 50 | xargs grep "#include" 2>/dev/null | sort | uniq -c | sort -nr >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No C/C++ includes found" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Look at shared library dependencies in compiled binaries
-        echo "" >> dependency_report.md
-        echo "## Binary Analysis" >> dependency_report.md
-        echo "### Shared Library Dependencies" >> dependency_report.md
-        echo '```' >> dependency_report.md
-        find . -type f -executable -not -path "*/\.*" | head -n 20 | xargs -I{} bash -c "echo 'File: {}'; ldd {} 2>/dev/null || echo 'Not a dynamic executable'" >> dependency_report.md 2>/dev/null || echo "No binaries found or ldd not available" >> dependency_report.md
-        echo '```' >> dependency_report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Binary Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo "### Shared Library Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        find . -type f -executable -not -path "*/\.*" | head -n 20 | xargs -I{} bash -c "echo 'File: {}'; ldd {} 2>/dev/null || echo 'Not a dynamic executable'" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No binaries found or ldd not available" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
         
         # Create a compressed archive of all dependency information
-        tar -czf dependency_info.tar.gz dependency_info dependency_report.md
+        tar -czf dependency_info.tar.gz dependency_info ${REPO_NAME}-dependency-report.md
         
-        echo "Dependency report generated at dependency_report.md"
+        echo "Dependency report generated at ${REPO_NAME}-dependency-report.md"
+      continue-on-error: true
+        
+    - name: Generate Conanfile
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        # Create conanfile.txt
+        echo "[requires]" > ${REPO_NAME}-conanfile.txt
+        
+        # Extract dependencies from system packages
+        dpkg-query -W -f='${binary:Package}\n' | grep -E '^lib.*-dev$' | sed 's/-dev$//' | while read -r pkg; do
+          # Map common system packages to Conan packages
+          case $pkg in
+            libboost*)
+              echo "boost/$(dpkg-query -W -f='${Version}' libboost-dev | cut -d. -f1-2)" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libzlib*)
+              echo "zlib/$(dpkg-query -W -f='${Version}' zlib1g-dev | cut -d- -f1)" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libssl*)
+              echo "openssl/$(dpkg-query -W -f='${Version}' libssl-dev | cut -d- -f1)" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libcurl*)
+              echo "libcurl/$(dpkg-query -W -f='${Version}' libcurl4-openssl-dev | cut -d- -f1)" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            *)
+              # Try to map other packages
+              CONAN_PKG=$(echo $pkg | sed 's/^lib//')
+              VERSION=$(dpkg-query -W -f='${Version}' ${pkg}-dev 2>/dev/null | cut -d- -f1)
+              if [ ! -z "$VERSION" ]; then
+                echo "${CONAN_PKG}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              fi
+              ;;
+          esac
+        done
+        
+        # Add vendored dependencies
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
+        
+        # Extract vendored dependencies from the report
+        grep -A 1 "Found.*library" ${REPO_NAME}-dependency-report.md | while read -r line; do
+          if [[ $line == *"Found"* ]]; then
+            LIB_NAME=$(echo $line | sed 's/Found //' | sed 's/ library//' | sed 's/ in.*//')
+            # Try to find version
+            VERSION=$(grep -A 5 "$line" ${REPO_NAME}-dependency-report.md | grep -E "version|VERSION" | head -n 1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
+            if [ ! -z "$VERSION" ]; then
+              echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+            else
+              echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+            fi
+          fi
+        done
+        
+        # Add CMake dependencies
+        if [ -f "build/CMakeCache.txt" ]; then
+          echo "" >> ${REPO_NAME}-conanfile.txt
+          echo "# CMake Dependencies" >> ${REPO_NAME}-conanfile.txt
+          grep -E "_VERSION|_FOUND" build/CMakeCache.txt | grep -v "NOTFOUND" | while read -r line; do
+            PKG=$(echo $line | cut -d: -f1 | sed 's/_VERSION//' | sed 's/_FOUND//')
+            VERSION=$(echo $line | cut -d= -f2)
+            if [[ $VERSION != "INTERNAL" ]] && [[ $VERSION != "1" ]]; then
+              echo "${PKG}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+            fi
+          done
+        fi
+        
+        # Add build requirements
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[build_requires]" >> ${REPO_NAME}-conanfile.txt
+        echo "cmake/3.27.1" >> ${REPO_NAME}-conanfile.txt
+        echo "ninja/1.11.1" >> ${REPO_NAME}-conanfile.txt
+        
+        # Add generator
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[generators]" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeDeps" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeToolchain" >> ${REPO_NAME}-conanfile.txt
+        
+        echo "Generated ${REPO_NAME}-conanfile.txt"
       continue-on-error: true
         
     - name: Get repository name
@@ -517,5 +601,6 @@ jobs:
       with:
         name: ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report
         path: |
-          dependency_report.md
+          ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
           dependency_info.tar.gz
+          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt
