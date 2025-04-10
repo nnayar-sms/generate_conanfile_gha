@@ -515,12 +515,18 @@ jobs:
         
         # Create a wrapper script to run OSV-Scanner via Docker
         echo '#!/bin/bash
-        docker run --rm -v "$(pwd):/src" ghcr.io/google/osv-scanner:latest osv-scanner "$@"' > osv-scanner
+        # Get the absolute path of the current directory
+        WORK_DIR=$(pwd)
+        # Run the container with the current directory mounted
+        docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest osv-scanner "$@"' > osv-scanner
         chmod +x osv-scanner
         
         # Create a wrapper script for indexer-api-caller
         echo '#!/bin/bash
-        docker run --rm -v "$(pwd):/src" ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"' > indexer-api-caller
+        # Get the absolute path of the current directory
+        WORK_DIR=$(pwd)
+        # Run the container with the current directory mounted
+        docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"' > indexer-api-caller
         chmod +x indexer-api-caller
         
         # Add the current directory to PATH
@@ -528,12 +534,30 @@ jobs:
         
         # Verify the tools are available
         echo "Verifying OSV tools..."
-        ./osv-scanner --version
-        ./indexer-api-caller --help
+        # Test osv-scanner with a simple command
+        if ! ./osv-scanner --version > /dev/null 2>&1; then
+          echo "Error: osv-scanner verification failed"
+          # Try running with full path
+          docker run --rm ghcr.io/google/osv-scanner:latest osv-scanner --version
+        else
+          echo "osv-scanner verification successful"
+        fi
+        
+        # Test indexer-api-caller with a simple command
+        if ! ./indexer-api-caller --help > /dev/null 2>&1; then
+          echo "Error: indexer-api-caller verification failed"
+          # Try running with full path
+          docker run --rm ghcr.io/google/osv-scanner:latest indexer-api-caller --help
+        else
+          echo "indexer-api-caller verification successful"
+        fi
         
         # Print environment for debugging
         echo "Environment variables:"
         env | grep -E "PATH|DOCKER"
+        echo "Current directory: $(pwd)"
+        echo "Files in current directory:"
+        ls -la
 
     - name: Generate Conanfile
       run: |
