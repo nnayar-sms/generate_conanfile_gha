@@ -743,15 +743,38 @@ jobs:
                     "$DEP_NAME" != "Reviewing" ]]; then
                 # Try OSV determineversion API first
                 echo "Attempting to determine version using OSV API for $DEP_NAME..."
-                OSV_VERSION=$(find "$SUBDIR" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
+                # Store the API response in a variable for detailed logging
+                OSV_RESPONSE=$(find "$SUBDIR" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
                   -H "Content-Type: application/json" \
-                  -d "{\"name\":\"$DEP_NAME\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}" | jq -r '.matches[0].repo_info.version // empty')
+                  -d "{\"name\":\"$DEP_NAME\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}")
+                
+                # Log the full API response
+                echo "OSV API Response for $DEP_NAME:"
+                echo "$OSV_RESPONSE" | jq '.'
+                
+                # Extract version from response
+                OSV_VERSION=$(echo "$OSV_RESPONSE" | jq -r '.matches[0].repo_info.version // empty')
                 
                 if [ ! -z "$OSV_VERSION" ]; then
                   echo "Found version using OSV API: $OSV_VERSION"
                   VERSION=$OSV_VERSION
                   VERSION_SOURCE="OSV API"
+                  
+                  # Log additional match details
+                  MATCH_COUNT=$(echo "$OSV_RESPONSE" | jq '.matches | length')
+                  echo "Number of matches found: $MATCH_COUNT"
+                  if [ "$MATCH_COUNT" -gt 1 ]; then
+                    echo "Top matches:"
+                    echo "$OSV_RESPONSE" | jq '.matches[0:3] | .[] | {score, version: .repo_info.version, tag: .repo_info.tag}'
+                  fi
                 else
+                  echo "No version found in OSV API response for $DEP_NAME"
+                  # Check if there was an error in the response
+                  ERROR=$(echo "$OSV_RESPONSE" | jq -r '.error // empty')
+                  if [ ! -z "$ERROR" ]; then
+                    echo "OSV API Error: $ERROR"
+                  fi
+                  
                   # Try to get version from git history
                   echo "Attempting to determine version from git history for $DEP_NAME..."
                   GIT_INFO=$(git log -n 1 --pretty=format:"%h|%H|%s|%an|%ad" -- "$SUBDIR" 2>/dev/null)
