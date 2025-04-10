@@ -266,7 +266,7 @@ jobs:
         # Common directories where dependencies are vendored
         echo "### Common Vendored Directories" >> ${REPO_NAME}-dependency-report.md
         echo '```' >> ${REPO_NAME}-dependency-report.md
-        # Add LLVM-specific patterns
+        # Add LLVM-specific directories to the search patterns
         for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
           if [ -d "$DIR" ]; then
             echo "Found potential vendored directory: $DIR" >> ${REPO_NAME}-dependency-report.md
@@ -558,16 +558,62 @@ jobs:
         # Extract vendored dependencies from the report
         echo "" >> ${REPO_NAME}-conanfile.txt
         echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
-        # Look for library mentions in the report
-        grep -A 1 "Found.*library" ${REPO_NAME}-dependency-report.md | while read -r line; do
-          if [[ $line == *"Found"* ]]; then
-            LIB_NAME=$(echo $line | sed 's/Found //' | sed 's/ library//' | sed 's/ in.*//')
+        
+        # First check LLVM-specific directories
+        for DIR in llvm/utils llvm/lib third-party runtimes; do
+          if [ -d "$DIR" ]; then
+            # Look for googletest
+            if [ -d "$DIR/googletest" ] || [ -d "$DIR/gtest" ]; then
+              VERSION=$(grep -E "version|release" "$DIR/googletest/CMakeLists.txt" "$DIR/gtest/CMakeLists.txt" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+              if [ -z "$VERSION" ]; then
+                VERSION="1.12.1"  # Default version if not found
+              fi
+              echo "gtest/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+            fi
+            
+            # Look for zlib
+            if [ -d "$DIR/zlib" ]; then
+              VERSION=$(grep -E '#define.*VERSION|ZLIB_VERSION' "$DIR/zlib/zlib.h" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+              if [ -z "$VERSION" ]; then
+                VERSION="1.2.13"  # Default version if not found
+              fi
+              echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+            fi
+          fi
+        done
+        
+        # Then look for library mentions in the report
+        grep -A 1 "Found vendored library" ${REPO_NAME}-dependency-report.md | while read -r line; do
+          if [[ $line == *"Found vendored library"* ]]; then
+            LIB_NAME=$(echo $line | sed 's/Found vendored library: //')
             # Try to find version in the next few lines
             VERSION=$(grep -A 5 "$line" ${REPO_NAME}-dependency-report.md | grep -E "version|VERSION" | head -n 1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
             if [ ! -z "$VERSION" ]; then
-              echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              # Map library names to Conan package names
+              case $LIB_NAME in
+                "zlib")
+                  echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "googletest"|"gtest")
+                  echo "gtest/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                *)
+                  echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+              esac
             else
-              echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+              # Use default versions for known libraries
+              case $LIB_NAME in
+                "zlib")
+                  echo "zlib/1.2.13" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                "googletest"|"gtest")
+                  echo "gtest/1.12.1" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+                *)
+                  echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+                  ;;
+              esac
             fi
           fi
         done
