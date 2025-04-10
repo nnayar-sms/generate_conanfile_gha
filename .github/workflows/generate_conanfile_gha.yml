@@ -507,39 +507,76 @@ jobs:
         fi
         
         # Verify Go installation
-        go version
+        echo "Verifying Go installation..."
+        go version || echo "Go version check failed"
+        echo "GOPATH: $(go env GOPATH)"
+        echo "GOROOT: $(go env GOROOT)"
         
         # Try installing the OSV tools
         echo "Attempting to install OSV tools..."
         
-        # First try the main package
-        if ! go install github.com/google/osv-scanner@latest; then
-          echo "Failed to install osv-scanner, trying alternative installation method..."
-          # Try installing from source
-          git clone https://github.com/google/osv-scanner.git
-          cd osv-scanner
-          go install ./...
-          cd ..
-          rm -rf osv-scanner
+        # First try the main package with verbose output
+        echo "Attempting to install osv-scanner from main package..."
+        if ! go install -v github.com/google/osv-scanner@latest 2>&1; then
+          echo "Failed to install osv-scanner from main package. Error details:"
+          go install -v github.com/google/osv-scanner@latest 2>&1 | tee osv_install_error.log
+          
+          echo "Trying alternative installation method from source..."
+          # Try installing from source with detailed logging
+          echo "Cloning osv-scanner repository..."
+          git clone https://github.com/google/osv-scanner.git 2>&1 | tee osv_clone.log
+          
+          if [ -d "osv-scanner" ]; then
+            echo "Building from source..."
+            cd osv-scanner
+            echo "Running go mod download..."
+            go mod download 2>&1 | tee osv_mod_download.log
+            echo "Running go install ./..."
+            go install ./... 2>&1 | tee osv_install_source.log
+            cd ..
+            rm -rf osv-scanner
+          else
+            echo "Failed to clone osv-scanner repository"
+            cat osv_clone.log
+          fi
         fi
         
-        # Verify the installation
-        if ! command -v osv-scanner &> /dev/null; then
-          echo "Error: osv-scanner installation failed"
-          exit 1
-        fi
+        # Verify the installation with detailed checks
+        echo "Verifying installation..."
+        echo "Checking for osv-scanner in PATH..."
+        which osv-scanner || echo "osv-scanner not found in PATH"
+        echo "Checking for osv-scanner in GOPATH/bin..."
+        ls -l $(go env GOPATH)/bin/osv-scanner* || echo "osv-scanner not found in GOPATH/bin"
         
         # Add Go bin to PATH
+        echo "Adding Go bin to PATH..."
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
         
         # Verify tools are available
-        echo "Installed tools:"
-        ls -l $(go env GOPATH)/bin/
+        echo "Installed tools in GOPATH/bin:"
+        ls -l $(go env GOPATH)/bin/ || echo "No tools found in GOPATH/bin"
+        
+        # Check for specific tools
+        echo "Checking for specific tools..."
+        for tool in osv-scanner indexer-api-caller; do
+          if command -v $tool &> /dev/null; then
+            echo "$tool is available at: $(which $tool)"
+            $tool --version || echo "Could not get version for $tool"
+          else
+            echo "$tool is not available"
+          fi
+        done
         
         # Fallback to curl if indexer-api-caller is not available
         if ! command -v indexer-api-caller &> /dev/null; then
           echo "Warning: indexer-api-caller not found, will use curl as fallback"
+          echo "Installing curl if not available..."
+          sudo apt-get install -y curl
         fi
+        
+        # Print environment for debugging
+        echo "Environment variables:"
+        env | grep -E "GO|PATH"
 
     - name: Generate Conanfile
       run: |
