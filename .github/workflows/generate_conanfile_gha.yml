@@ -564,18 +564,42 @@ jobs:
           if [ -d "$DIR" ]; then
             # Look for googletest
             if [ -d "$DIR/googletest" ] || [ -d "$DIR/gtest" ]; then
-              VERSION=$(grep -E "version|release" "$DIR/googletest/CMakeLists.txt" "$DIR/gtest/CMakeLists.txt" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-              if [ -z "$VERSION" ]; then
-                VERSION="1.12.1"  # Default version if not found
+              # Try OSV determineversion API first
+              echo "Attempting to determine version using OSV API for googletest..."
+              OSV_VERSION=$(find "$DIR/googletest" "$DIR/gtest" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"googletest\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}" | jq -r '.matches[0].repo_info.version // empty')
+              
+              if [ ! -z "$OSV_VERSION" ]; then
+                echo "Found version using OSV API: $OSV_VERSION"
+                VERSION=$OSV_VERSION
+              else
+                # Fallback to traditional version detection
+                VERSION=$(find "$DIR/googletest" "$DIR/gtest" -type f \( -name "CMakeLists.txt" -o -name "README.md" -o -name "version.txt" -o -name "VERSION" \) -exec grep -E "version|release|VERSION" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+                if [ -z "$VERSION" ]; then
+                  VERSION="1.12.1"  # Default version if not found
+                fi
               fi
               echo "gtest/${VERSION}" >> ${REPO_NAME}-conanfile.txt
             fi
             
             # Look for zlib
             if [ -d "$DIR/zlib" ]; then
-              VERSION=$(grep -E '#define.*VERSION|ZLIB_VERSION' "$DIR/zlib/zlib.h" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-              if [ -z "$VERSION" ]; then
-                VERSION="1.2.13"  # Default version if not found
+              # Try OSV determineversion API first
+              echo "Attempting to determine version using OSV API for zlib..."
+              OSV_VERSION=$(find "$DIR/zlib" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"zlib\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}" | jq -r '.matches[0].repo_info.version // empty')
+              
+              if [ ! -z "$OSV_VERSION" ]; then
+                echo "Found version using OSV API: $OSV_VERSION"
+                VERSION=$OSV_VERSION
+              else
+                # Fallback to traditional version detection
+                VERSION=$(find "$DIR/zlib" -type f \( -name "zlib.h" -o -name "CMakeLists.txt" -o -name "README" -o -name "version.txt" -o -name "VERSION" \) -exec grep -E "#define.*VERSION|ZLIB_VERSION|version|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+                if [ -z "$VERSION" ]; then
+                  VERSION="1.2.13"  # Default version if not found
+                fi
               fi
               echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
             fi
@@ -583,26 +607,37 @@ jobs:
             # Look for other common LLVM dependencies
             for DEP in libxml2 libedit libffi; do
               if [ -d "$DIR/$DEP" ]; then
-                VERSION=$(find "$DIR/$DEP" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" \) -exec grep -E "version|VERSION|AC_INIT" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                if [ ! -z "$VERSION" ]; then
-                  echo "${DEP}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                # Try OSV determineversion API first
+                echo "Attempting to determine version using OSV API for $DEP..."
+                OSV_VERSION=$(find "$DIR/$DEP" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"name\":\"$DEP\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}" | jq -r '.matches[0].repo_info.version // empty')
+                
+                if [ ! -z "$OSV_VERSION" ]; then
+                  echo "Found version using OSV API: $OSV_VERSION"
+                  VERSION=$OSV_VERSION
                 else
-                  case $DEP in
-                    "libxml2")
-                      echo "libxml2/2.11.5" >> ${REPO_NAME}-conanfile.txt
-                      ;;
-                    "libedit")
-                      echo "libedit/20230828" >> ${REPO_NAME}-conanfile.txt
-                      ;;
-                    "libffi")
-                      echo "libffi/3.4.4" >> ${REPO_NAME}-conanfile.txt
-                      ;;
-                  esac
+                  # Fallback to traditional version detection
+                  VERSION=$(find "$DIR/$DEP" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "README" -o -name "version.txt" -o -name "VERSION" \) -exec grep -E "version|VERSION|AC_INIT|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+                  if [ -z "$VERSION" ]; then
+                    case $DEP in
+                      "libxml2")
+                        VERSION="2.11.5"
+                        ;;
+                      "libedit")
+                        VERSION="20230828"
+                        ;;
+                      "libffi")
+                        VERSION="3.4.4"
+                        ;;
+                    esac
+                  fi
                 fi
+                echo "${DEP}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
               fi
             done
 
-            # Add any other directories that look like dependencies
+            # Look for other potential dependencies in common directories
             for SUBDIR in $(find "$DIR" -maxdepth 1 -type d | grep -v "^$DIR$"); do
               DEP_NAME=$(basename "$SUBDIR")
               # Skip common non-dependency directories and LLVM internal components
@@ -692,12 +727,27 @@ jobs:
                     "$DEP_NAME" != "not" && \
                     "$DEP_NAME" != "textmate" && \
                     "$DEP_NAME" != "Reviewing" ]]; then
-                VERSION=$(find "$SUBDIR" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "VERSION" -o -name "version.txt" \) -exec grep -E "version|VERSION|AC_INIT" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                if [ ! -z "$VERSION" ]; then
-                  echo "${DEP_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                # Try OSV determineversion API first
+                echo "Attempting to determine version using OSV API for $DEP_NAME..."
+                OSV_VERSION=$(find "$SUBDIR" -type f \( -name "*.c" -o -name "*.cc" -o -name "*.h" -o -name "*.hh" -o -name "*.cpp" -o -name "*.hpp" \) -exec md5sum {} \; | sort | cut -d' ' -f1 | tr '\n' ' ' | xargs -I{} curl -s -X POST "https://api.osv.dev/v1experimental/determineversion" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"name\":\"$DEP_NAME\",\"file_hashes\":[{\"hash\":\"{}\",\"file_path\":\"\"}]}" | jq -r '.matches[0].repo_info.version // empty')
+                
+                if [ ! -z "$OSV_VERSION" ]; then
+                  echo "Found version using OSV API: $OSV_VERSION"
+                  VERSION=$OSV_VERSION
                 else
-                  echo "${DEP_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+                  # Fallback to traditional version detection
+                  VERSION=$(find "$SUBDIR" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "VERSION" -o -name "version.txt" -o -name "README" -o -name "CHANGELOG" \) -exec grep -E "version|VERSION|AC_INIT|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+                  if [ -z "$VERSION" ]; then
+                    # Try to get version from git history
+                    VERSION=$(git log -n 1 --pretty=format:"%h" -- "$SUBDIR" 2>/dev/null)
+                    if [ -z "$VERSION" ]; then
+                      VERSION="1.0.0 # Version not detected"
+                    fi
+                  fi
                 fi
+                echo "${DEP_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
               fi
             done
           fi
