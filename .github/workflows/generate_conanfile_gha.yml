@@ -279,48 +279,60 @@ jobs:
         # Common directories where dependencies are vendored
         echo "### Common Vendored Directories" >> dependency_report.md
         echo '```' >> dependency_report.md
-        # Add FFmpeg-specific patterns
-        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty libav* libsw* libpostproc libavdevice; do
+        # Add LLVM-specific patterns
+        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
           if [ -d "$DIR" ]; then
             echo "Found potential vendored directory: $DIR" >> dependency_report.md
             echo "Contents:" >> dependency_report.md
             ls -la "$DIR" >> dependency_report.md
             echo "" >> dependency_report.md
             
-            # Special handling for FFmpeg libraries
-            if [[ "$DIR" == libav* ]] || [[ "$DIR" == libsw* ]] || [[ "$DIR" == "libpostproc" ]] || [[ "$DIR" == "libavdevice" ]]; then
-              echo "FFmpeg library detected: $DIR" >> dependency_report.md
-              # Look for version information in FFmpeg libraries
-              if [ -f "$DIR/version.h" ]; then
-                echo "Version information from $DIR/version.h:" >> dependency_report.md
-                grep -E '#define.*VERSION|version|RELEASE' "$DIR/version.h" >> dependency_report.md 2>/dev/null || echo "No version defines found" >> dependency_report.md
+            # Special handling for LLVM libraries
+            if [[ "$DIR" == "llvm/utils" ]] || [[ "$DIR" == "llvm/lib" ]] || [[ "$DIR" == "third-party" ]] || [[ "$DIR" == "runtimes" ]]; then
+              echo "LLVM library directory detected: $DIR" >> dependency_report.md
+              
+              # Look for googletest
+              if [ -d "$DIR/googletest" ] || [ -d "$DIR/gtest" ]; then
+                echo "Found googletest in $DIR" >> dependency_report.md
+                # Look for version information
+                find "$DIR/googletest" "$DIR/gtest" -name "CMakeLists.txt" -o -name "README.md" | while read -r file; do
+                  if [ -f "$file" ]; then
+                    echo "Version information from $file:" >> dependency_report.md
+                    grep -i -E "version|release" "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
+                  fi
+                done
               fi
-              # Look for specific FFmpeg dependencies
-              if [ -d "$DIR/x264" ] || [ -d "$DIR/x265" ]; then
-                echo "Found video encoding library in $DIR" >> dependency_report.md
-              fi
-              if [ -d "$DIR/lame" ] || [ -d "$DIR/mp3lame" ]; then
-                echo "Found MP3 encoding library in $DIR" >> dependency_report.md
+              
+              # Look for zlib
+              if [ -d "$DIR/zlib" ]; then
+                echo "Found zlib in $DIR" >> dependency_report.md
+                # Look for version information
+                if [ -f "$DIR/zlib/zlib.h" ]; then
+                  echo "Version information from zlib.h:" >> dependency_report.md
+                  grep -E '#define.*VERSION|version|ZLIB_VERSION' "$DIR/zlib/zlib.h" >> dependency_report.md 2>/dev/null || echo "No version defines found" >> dependency_report.md
+                fi
               fi
             fi
           fi
         done
         echo '```' >> dependency_report.md
         
-        # Look for FFmpeg-specific dependencies
+        # Look for LLVM-specific dependencies
         echo "" >> dependency_report.md
-        echo "### FFmpeg-Specific Dependencies" >> dependency_report.md
+        echo "### LLVM-Specific Dependencies" >> dependency_report.md
         echo '```' >> dependency_report.md
-        # Look for common FFmpeg dependencies
-        for DEP in x264 x265 lame mp3lame; do
+        # Look for common LLVM dependencies
+        for DEP in googletest gtest zlib; do
           if [ -d "$DEP" ] || [ -d "lib$DEP" ]; then
             echo "Found $DEP library" >> dependency_report.md
             # Try to find version information
-            find . -path "*/$DEP/*" -o -path "*/lib$DEP/*" | grep -E 'version\.h|VERSION|version\.txt|README|CHANGELOG' | while read -r file; do
+            find . -path "*/$DEP/*" -o -path "*/lib$DEP/*" | grep -E 'version\.h|VERSION|version\.txt|README|CHANGELOG|CMakeLists.txt' | while read -r file; do
               if [ -f "$file" ]; then
                 echo "Version information from $file:" >> dependency_report.md
                 if [[ "$file" == *"version.h"* ]]; then
                   grep -E '#define.*VERSION|version|RELEASE' "$file" >> dependency_report.md 2>/dev/null || echo "No version defines found" >> dependency_report.md
+                elif [[ "$file" == *"CMakeLists.txt"* ]]; then
+                  grep -i -E "version|project" "$file" >> dependency_report.md 2>/dev/null || echo "No version info found" >> dependency_report.md
                 else
                   head -n 20 "$file" | grep -i -E "version|release" >> dependency_report.md 2>/dev/null || echo "No obvious version info in header" >> dependency_report.md
                 fi
