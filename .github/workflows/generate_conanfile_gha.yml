@@ -497,86 +497,43 @@ jobs:
         
     - name: Install OSV tools
       run: |
-        # Install Go if not already installed
-        if ! command -v go &> /dev/null; then
-          echo "Installing Go..."
-          wget -q https://golang.org/dl/go1.21.0.linux-amd64.tar.gz
-          sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
-          echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-          source ~/.bashrc
+        # Install Docker if not already installed
+        if ! command -v docker &> /dev/null; then
+          echo "Installing Docker..."
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+          sudo systemctl start docker
+          sudo systemctl enable docker
         fi
         
-        # Verify Go installation
-        echo "Verifying Go installation..."
-        go version || echo "Go version check failed"
-        echo "GOPATH: $(go env GOPATH)"
-        echo "GOROOT: $(go env GOROOT)"
+        # Pull the official OSV-Scanner Docker image
+        echo "Pulling OSV-Scanner Docker image..."
+        docker pull ghcr.io/google/osv-scanner:latest
         
-        # Try installing the OSV tools
-        echo "Attempting to install OSV tools..."
+        # Verify the image was pulled successfully
+        docker images ghcr.io/google/osv-scanner:latest
         
-        # First try the main package with verbose output
-        echo "Attempting to install osv-scanner from main package..."
-        if ! go install -v github.com/google/osv-scanner@latest 2>&1; then
-          echo "Failed to install osv-scanner from main package. Error details:"
-          go install -v github.com/google/osv-scanner@latest 2>&1 | tee osv_install_error.log
-          
-          echo "Trying alternative installation method from source..."
-          # Try installing from source with detailed logging
-          echo "Cloning osv-scanner repository..."
-          git clone https://github.com/google/osv-scanner.git 2>&1 | tee osv_clone.log
-          
-          if [ -d "osv-scanner" ]; then
-            echo "Building from source..."
-            cd osv-scanner
-            echo "Running go mod download..."
-            go mod download 2>&1 | tee osv_mod_download.log
-            echo "Running go install ./..."
-            go install ./... 2>&1 | tee osv_install_source.log
-            cd ..
-            rm -rf osv-scanner
-          else
-            echo "Failed to clone osv-scanner repository"
-            cat osv_clone.log
-          fi
-        fi
+        # Create a wrapper script to run OSV-Scanner via Docker
+        echo '#!/bin/bash
+        docker run --rm -v "$(pwd):/src" ghcr.io/google/osv-scanner:latest osv-scanner "$@"' > osv-scanner
+        chmod +x osv-scanner
         
-        # Verify the installation with detailed checks
-        echo "Verifying installation..."
-        echo "Checking for osv-scanner in PATH..."
-        which osv-scanner || echo "osv-scanner not found in PATH"
-        echo "Checking for osv-scanner in GOPATH/bin..."
-        ls -l $(go env GOPATH)/bin/osv-scanner* || echo "osv-scanner not found in GOPATH/bin"
+        # Create a wrapper script for indexer-api-caller
+        echo '#!/bin/bash
+        docker run --rm -v "$(pwd):/src" ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"' > indexer-api-caller
+        chmod +x indexer-api-caller
         
-        # Add Go bin to PATH
-        echo "Adding Go bin to PATH..."
-        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+        # Add the current directory to PATH
+        echo "$(pwd)" >> $GITHUB_PATH
         
-        # Verify tools are available
-        echo "Installed tools in GOPATH/bin:"
-        ls -l $(go env GOPATH)/bin/ || echo "No tools found in GOPATH/bin"
-        
-        # Check for specific tools
-        echo "Checking for specific tools..."
-        for tool in osv-scanner indexer-api-caller; do
-          if command -v $tool &> /dev/null; then
-            echo "$tool is available at: $(which $tool)"
-            $tool --version || echo "Could not get version for $tool"
-          else
-            echo "$tool is not available"
-          fi
-        done
-        
-        # Fallback to curl if indexer-api-caller is not available
-        if ! command -v indexer-api-caller &> /dev/null; then
-          echo "Warning: indexer-api-caller not found, will use curl as fallback"
-          echo "Installing curl if not available..."
-          sudo apt-get install -y curl
-        fi
+        # Verify the tools are available
+        echo "Verifying OSV tools..."
+        ./osv-scanner --version
+        ./indexer-api-caller --help
         
         # Print environment for debugging
         echo "Environment variables:"
-        env | grep -E "GO|PATH"
+        env | grep -E "PATH|DOCKER"
 
     - name: Generate Conanfile
       run: |
