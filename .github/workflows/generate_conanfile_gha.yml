@@ -573,14 +573,18 @@ jobs:
               if [ ! -z "$OSV_VERSION" ]; then
                 echo "Found version using OSV API: $OSV_VERSION"
                 VERSION=$OSV_VERSION
+                VERSION_SOURCE="OSV API"
               else
                 # Fallback to traditional version detection
                 VERSION=$(find "$DIR/googletest" "$DIR/gtest" -type f \( -name "CMakeLists.txt" -o -name "README.md" -o -name "version.txt" -o -name "VERSION" \) -exec grep -E "version|release|VERSION" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                if [ -z "$VERSION" ]; then
+                if [ ! -z "$VERSION" ]; then
+                  VERSION_SOURCE="File-based detection (CMakeLists.txt/README/VERSION)"
+                else
                   VERSION="1.12.1"  # Default version if not found
+                  VERSION_SOURCE="Default version"
                 fi
               fi
-              echo "gtest/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              echo "gtest/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
             fi
             
             # Look for zlib
@@ -594,14 +598,18 @@ jobs:
               if [ ! -z "$OSV_VERSION" ]; then
                 echo "Found version using OSV API: $OSV_VERSION"
                 VERSION=$OSV_VERSION
+                VERSION_SOURCE="OSV API"
               else
                 # Fallback to traditional version detection
                 VERSION=$(find "$DIR/zlib" -type f \( -name "zlib.h" -o -name "CMakeLists.txt" -o -name "README" -o -name "version.txt" -o -name "VERSION" \) -exec grep -E "#define.*VERSION|ZLIB_VERSION|version|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                if [ -z "$VERSION" ]; then
+                if [ ! -z "$VERSION" ]; then
+                  VERSION_SOURCE="File-based detection (zlib.h/CMakeLists.txt/VERSION)"
+                else
                   VERSION="1.2.13"  # Default version if not found
+                  VERSION_SOURCE="Default version"
                 fi
               fi
-              echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              echo "zlib/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
             fi
             
             # Look for other common LLVM dependencies
@@ -616,24 +624,30 @@ jobs:
                 if [ ! -z "$OSV_VERSION" ]; then
                   echo "Found version using OSV API: $OSV_VERSION"
                   VERSION=$OSV_VERSION
+                  VERSION_SOURCE="OSV API"
                 else
                   # Fallback to traditional version detection
                   VERSION=$(find "$DIR/$DEP" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "README" -o -name "version.txt" -o -name "VERSION" \) -exec grep -E "version|VERSION|AC_INIT|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                  if [ -z "$VERSION" ]; then
+                  if [ ! -z "$VERSION" ]; then
+                    VERSION_SOURCE="File-based detection (headers/CMakeLists.txt/VERSION)"
+                  else
                     case $DEP in
                       "libxml2")
                         VERSION="2.11.5"
+                        VERSION_SOURCE="Default version"
                         ;;
                       "libedit")
                         VERSION="20230828"
+                        VERSION_SOURCE="Default version"
                         ;;
                       "libffi")
                         VERSION="3.4.4"
+                        VERSION_SOURCE="Default version"
                         ;;
                     esac
                   fi
                 fi
-                echo "${DEP}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                echo "${DEP}/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
               fi
             done
 
@@ -736,18 +750,24 @@ jobs:
                 if [ ! -z "$OSV_VERSION" ]; then
                   echo "Found version using OSV API: $OSV_VERSION"
                   VERSION=$OSV_VERSION
+                  VERSION_SOURCE="OSV API"
                 else
                   # Fallback to traditional version detection
                   VERSION=$(find "$SUBDIR" -type f \( -name "*.h" -o -name "CMakeLists.txt" -o -name "configure.ac" -o -name "VERSION" -o -name "version.txt" -o -name "README" -o -name "CHANGELOG" \) -exec grep -E "version|VERSION|AC_INIT|release" {} \; 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
-                  if [ -z "$VERSION" ]; then
+                  if [ ! -z "$VERSION" ]; then
+                    VERSION_SOURCE="File-based detection (headers/CMakeLists.txt/VERSION)"
+                  else
                     # Try to get version from git history
                     VERSION=$(git log -n 1 --pretty=format:"%h" -- "$SUBDIR" 2>/dev/null)
-                    if [ -z "$VERSION" ]; then
-                      VERSION="1.0.0 # Version not detected"
+                    if [ ! -z "$VERSION" ]; then
+                      VERSION_SOURCE="Git commit hash"
+                    else
+                      VERSION="1.0.0"
+                      VERSION_SOURCE="Default version"
                     fi
                   fi
                 fi
-                echo "${DEP_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                echo "${DEP_NAME}/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
               fi
             done
           fi
@@ -760,47 +780,49 @@ jobs:
             # Try to find version in the next few lines
             VERSION=$(grep -A 5 "$line" ${REPO_NAME}-dependency-report.md | grep -E "version|VERSION" | head -n 1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
             if [ ! -z "$VERSION" ]; then
+              VERSION_SOURCE="Dependency report analysis"
               # Map library names to Conan package names
               case $LIB_NAME in
                 "zlib")
-                  echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  echo "zlib/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "googletest"|"gtest")
-                  echo "gtest/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  echo "gtest/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "libxml2")
-                  echo "libxml2/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  echo "libxml2/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "libedit")
-                  echo "libedit/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  echo "libedit/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "libffi")
-                  echo "libffi/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  echo "libffi/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 *)
-                  echo "${LIB_NAME}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+                  echo "${LIB_NAME}/${VERSION} # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
               esac
             else
+              VERSION_SOURCE="Default version"
               # Use default versions for known libraries
               case $LIB_NAME in
                 "zlib")
-                  echo "zlib/1.2.13" >> ${REPO_NAME}-conanfile.txt
+                  echo "zlib/1.2.13 # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "googletest"|"gtest")
-                  echo "gtest/1.12.1" >> ${REPO_NAME}-conanfile.txt
+                  echo "gtest/1.12.1 # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "libxml2")
-                  echo "libxml2/2.11.5" >> ${REPO_NAME}-conanfile.txt
+                  echo "libxml2/2.11.5 # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "libedit")
-                  echo "libedit/20230828" >> ${REPO_NAME}-conanfile.txt
+                  echo "libedit/20230828 # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 "libffi")
-                  echo "libffi/3.4.4" >> ${REPO_NAME}-conanfile.txt
+                  echo "libffi/3.4.4 # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
                 *)
-                  echo "${LIB_NAME}/1.0.0 # Version not detected" >> ${REPO_NAME}-conanfile.txt
+                  echo "${LIB_NAME}/1.0.0 # Version determined via ${VERSION_SOURCE}" >> ${REPO_NAME}-conanfile.txt
                   ;;
               esac
             fi
@@ -811,14 +833,20 @@ jobs:
         if [ -f "conanfile.txt" ]; then
           echo "" >> ${REPO_NAME}-conanfile.txt
           echo "# Original Conan Dependencies" >> ${REPO_NAME}-conanfile.txt
-          grep -v "^#" conanfile.txt | grep -v "^$" >> ${REPO_NAME}-conanfile.txt
+          grep -v "^#" conanfile.txt | grep -v "^$" | while read -r line; do
+            if [[ $line == *"#"* ]]; then
+              echo "$line" >> ${REPO_NAME}-conanfile.txt
+            else
+              echo "$line # Version from original conanfile.txt" >> ${REPO_NAME}-conanfile.txt
+            fi
+          done
         fi
         
-        # Add build requirements
+        # Add build requirements with version source
         echo "" >> ${REPO_NAME}-conanfile.txt
         echo "[build_requires]" >> ${REPO_NAME}-conanfile.txt
-        echo "cmake/3.27.1" >> ${REPO_NAME}-conanfile.txt
-        echo "ninja/1.11.1" >> ${REPO_NAME}-conanfile.txt
+        echo "cmake/3.27.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        echo "ninja/1.11.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
         
         # Add generator
         echo "" >> ${REPO_NAME}-conanfile.txt
