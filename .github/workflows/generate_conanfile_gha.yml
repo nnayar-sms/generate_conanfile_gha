@@ -517,16 +517,26 @@ jobs:
         echo '#!/bin/bash
         # Get the absolute path of the current directory
         WORK_DIR=$(pwd)
-        # Run the container with the current directory mounted
-        docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest osv-scanner "$@"' > osv-scanner
+        # Special handling for --version flag
+        if [ "$1" = "--version" ]; then
+          docker run --rm ghcr.io/google/osv-scanner:latest osv-scanner --version
+        else
+          # Run the container with the current directory mounted
+          docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest osv-scanner "$@"
+        fi' > osv-scanner
         chmod +x osv-scanner
         
         # Create a wrapper script for indexer-api-caller
         echo '#!/bin/bash
         # Get the absolute path of the current directory
         WORK_DIR=$(pwd)
-        # Run the container with the current directory mounted
-        docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"' > indexer-api-caller
+        # Special handling for --help flag
+        if [ "$1" = "--help" ]; then
+          docker run --rm ghcr.io/google/osv-scanner:latest indexer-api-caller --help
+        else
+          # Run the container with the current directory mounted
+          docker run --rm -v "${WORK_DIR}:/src" -w /src ghcr.io/google/osv-scanner:latest indexer-api-caller "$@"
+        fi' > indexer-api-caller
         chmod +x indexer-api-caller
         
         # Add the current directory to PATH
