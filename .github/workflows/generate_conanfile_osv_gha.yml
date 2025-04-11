@@ -1,7 +1,9 @@
-name: Generate C C++ Dependency Report using OSV
+name: Generate Dependency Report
 
 on:
-  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
 
 jobs:
   generate-report:
@@ -24,7 +26,7 @@ jobs:
         
     - name: Generate Dependency Report
       run: |
-        python generate_dependency_report.py ${{ github.workspace }} --debug --log-level DEBUG
+        python generate_dependency_report.py ${{ github.workspace }} --auto-detect --debug --log-level DEBUG
       
     - name: Upload Report
       uses: actions/upload-artifact@v3
