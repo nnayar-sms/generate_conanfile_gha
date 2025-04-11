@@ -248,6 +248,42 @@ def generate_markdown_report(root_dir, output_file="dependency_report.md"):
     
     logger.info(f"Report generated successfully at: {report_path}")
 
+def generate_conanfile(root_dir, output_file="conanfile.txt"):
+    """Generate a conanfile.txt based on successfully processed libraries."""
+    osv_files = find_osv_response_files(root_dir)
+    
+    if not osv_files:
+        logger.warning(f"No OSV response files found in {root_dir}")
+        return
+    
+    # Get absolute path for the conanfile
+    conanfile_path = os.path.abspath(os.path.join(root_dir, output_file))
+    logger.info(f"Generating conanfile.txt at: {conanfile_path}")
+    
+    conanfile_lines = ["[requires]\n"]
+    
+    for osv_file in osv_files:
+        try:
+            with open(osv_file, 'r') as f:
+                osv_response = json.load(f)
+            
+            # Get library name from the directory path
+            library_name = get_library_name(osv_file)
+            top_versions = get_top_versions(osv_response, num_versions=1)  # Get only the top version
+            
+            if top_versions:
+                version = top_versions[0]
+                # Format: library_name/version
+                conanfile_lines.append(f"{library_name}/{version['version']}")
+        except Exception as e:
+            logger.error(f"Error processing {osv_file} for conanfile: {str(e)}")
+    
+    # Write conanfile.txt
+    with open(conanfile_path, 'w') as f:
+        f.write('\n'.join(conanfile_lines))
+    
+    logger.info(f"Conanfile.txt generated successfully at: {conanfile_path}")
+
 def main():
     parser = argparse.ArgumentParser(description='Generate a dependency report from OSV API responses.')
     parser.add_argument('root_dir', help='Root directory containing OSV response files')
@@ -271,9 +307,10 @@ def main():
         logger.info(f"Processing directory: {args.root_dir}")
         process_all_directories(args.root_dir, args.debug)
     
-    # Generate the report
+    # Generate the report and conanfile
     logger.info("Generating dependency report...")
     generate_markdown_report(args.root_dir, args.output)
+    generate_conanfile(args.root_dir)
 
 if __name__ == "__main__":
     main() 
