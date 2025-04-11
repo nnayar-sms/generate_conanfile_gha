@@ -35,8 +35,10 @@ jobs:
         cd scripts-repo/scripts
         python generate_dependency_report.py ${{ github.workspace }}/target-repo --auto-detect --debug --log-level DEBUG
       
-    - name: Upload Report
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: dependency-report
-        path: target-repo/dependency_report.md 
+        name: dependency-files
+        path: |
+          target-repo/dependency_report.md
+          target-repo/conanfile.txt 
