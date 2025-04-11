@@ -27,7 +27,7 @@ jobs:
         python generate_dependency_report.py ${{ github.workspace }} --auto-detect --debug --log-level DEBUG
       
     - name: Upload Report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dependency-report
         path: dependency_report.md 
