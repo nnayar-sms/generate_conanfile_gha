@@ -8,9 +8,17 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    # First checkout the target repository (where we'll generate the report)
     - uses: actions/checkout@v3
       with:
         submodules: true  # Important for Git submodule detection
+        path: target-repo
+    
+    # Then checkout the repository containing the scripts
+    - uses: actions/checkout@v3
+      with:
+        repository: nnayar-sms/generate_conanfile_gha  # Replace with your script repository
+        path: scripts-repo
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -24,10 +32,11 @@ jobs:
         
     - name: Generate Dependency Report
       run: |
-        python generate_dependency_report.py ${{ github.workspace }} --auto-detect --debug --log-level DEBUG
+        cd scripts-repo/scripts
+        python generate_dependency_report.py ${{ github.workspace }}/target-repo --auto-detect --debug --log-level DEBUG
       
     - name: Upload Report
       uses: actions/upload-artifact@v4
       with:
         name: dependency-report
-        path: dependency_report.md 
+        path: target-repo/dependency_report.md 
