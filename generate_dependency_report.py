@@ -12,6 +12,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Common third-party directory names
+THIRD_PARTY_DIRS = [
+    '3rdparty',
+    'third-party',
+    'third_party',
+    'thirdparty',
+    'external',
+    'externals',
+    'deps',
+    'dependencies',
+    'libs',
+    'libraries'
+]
+
 def get_top_versions(osv_response, num_versions=3):
     """Extract top N versions from OSV API response."""
     matches = osv_response.get("matches", [])
@@ -82,6 +96,42 @@ def find_no_git_files(root_dir):
 def find_no_submodules_files(root_dir):
     """Recursively find all no-submodules-info files in the directory tree."""
     return list(Path(root_dir).rglob("*_no_submodules_info.json"))
+
+def find_third_party_dirs(root_dir):
+    """Find all third-party package directories in the given root directory."""
+    third_party_dirs = []
+    
+    # First check immediate subdirectories
+    for item in os.listdir(root_dir):
+        item_path = os.path.join(root_dir, item)
+        if os.path.isdir(item_path) and item.lower() in THIRD_PARTY_DIRS:
+            third_party_dirs.append(item_path)
+            logger.info(f"Found third-party directory: {item_path}")
+    
+    # Then recursively search for these directories
+    for dirpath, dirnames, _ in os.walk(root_dir):
+        for dirname in dirnames:
+            if dirname.lower() in THIRD_PARTY_DIRS:
+                full_path = os.path.join(dirpath, dirname)
+                if full_path not in third_party_dirs:  # Avoid duplicates
+                    third_party_dirs.append(full_path)
+                    logger.info(f"Found third-party directory: {full_path}")
+    
+    return third_party_dirs
+
+def process_third_party_dirs(root_dir, debug=False):
+    """Process all found third-party directories."""
+    third_party_dirs = find_third_party_dirs(root_dir)
+    
+    if not third_party_dirs:
+        logger.warning(f"No third-party directories found in {root_dir}")
+        return
+    
+    logger.info(f"Found {len(third_party_dirs)} third-party directories to process")
+    
+    for dir_path in third_party_dirs:
+        logger.info(f"\nProcessing third-party directory: {dir_path}")
+        process_all_directories(dir_path, debug)
 
 def generate_markdown_report(root_dir, output_file="dependency_report.md"):
     """Generate a markdown report of dependencies and their versions."""
@@ -205,16 +255,23 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
                        default='INFO', help='Set the logging level')
+    parser.add_argument('--auto-detect', action='store_true', 
+                       help='Automatically detect and process third-party directories')
     args = parser.parse_args()
     
     # Set logging level
     logger.setLevel(getattr(logging, args.log_level))
     
-    # First process all directories
-    logger.info("Processing all directories...")
-    process_all_directories(args.root_dir, args.debug)
+    if args.auto_detect:
+        # Process all detected third-party directories
+        logger.info("Auto-detecting third-party directories...")
+        process_third_party_dirs(args.root_dir, args.debug)
+    else:
+        # Process the specified directory
+        logger.info(f"Processing directory: {args.root_dir}")
+        process_all_directories(args.root_dir, args.debug)
     
-    # Then generate the report
+    # Generate the report
     logger.info("Generating dependency report...")
     generate_markdown_report(args.root_dir, args.output)
 
