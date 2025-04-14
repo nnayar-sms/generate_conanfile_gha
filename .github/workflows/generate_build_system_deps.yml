@@ -28,56 +28,231 @@ jobs:
 
     - name: Analyze CMake Dependencies
       run: |
+        set -e
         REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
         
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "## CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
-        CMAKE_FILES=$(find . -name "CMakeLists.txt" -not -path "*/build/*" -not -path "*/\.*")
-        if [ ! -z "$CMAKE_FILES" ]; then
-          echo "### Direct CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
-          echo '```' >> ${REPO_NAME}-dependency-report.md
-          for CMAKE_FILE in $CMAKE_FILES; do
-            echo "File: $CMAKE_FILE" >> ${REPO_NAME}-dependency-report.md
-            {
-              grep -n "find_package" "$CMAKE_FILE" || echo "No find_package found"
-              grep -n "pkg_check_modules" "$CMAKE_FILE" || echo "No pkg_check_modules found"
-            } >> ${REPO_NAME}-dependency-report.md
-            echo "" >> ${REPO_NAME}-dependency-report.md
-          done
-          echo '```' >> ${REPO_NAME}-dependency-report.md
+        echo "" >> "${REPO_NAME}-dependency-report.md"
+        echo "## CMake Dependencies" >> "${REPO_NAME}-dependency-report.md"
+        
+        # Find all CMakeLists.txt files
+        find . -name "CMakeLists.txt" -not -path "*/build/*" -not -path "*/\.*" > cmakefiles.tmp
+        
+        if [ -s cmakefiles.tmp ]; then
+          echo "### Direct CMake Dependencies" >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
           
-          if [ -f "build/CMakeCache.txt" ]; then
-            echo "" >> ${REPO_NAME}-dependency-report.md
-            echo "### CMake Cache - Dependency Versions" >> ${REPO_NAME}-dependency-report.md
-            echo '```' >> ${REPO_NAME}-dependency-report.md
-            grep -E "_VERSION|_FOUND" build/CMakeCache.txt | sort >> ${REPO_NAME}-dependency-report.md
-            echo '```' >> ${REPO_NAME}-dependency-report.md
+          # Create a temporary file for dependency tracking
+          touch deps.tmp
+          
+          while IFS= read -r CMAKE_FILE; do
+            echo "File: $CMAKE_FILE" >> "${REPO_NAME}-dependency-report.md"
             
+            # 1. find_package dependencies
+            echo "find_package dependencies:" >> "${REPO_NAME}-dependency-report.md"
+            grep -n "find_package" "$CMAKE_FILE" | while read -r line; do
+              echo "$line" >> "${REPO_NAME}-dependency-report.md"
+              # Extract package name and version if specified
+              PKG=$(echo "$line" | grep -oP 'find_package\(\s*\K[^ \)]+')
+              VERSION=$(echo "$line" | grep -oP 'VERSION\s+\K[^ \)]+')
+              if [ ! -z "$PKG" ]; then
+                echo "${PKG}${VERSION:+:$VERSION}" >> deps.tmp
+              fi
+            done
+            
+            # 2. pkg_check_modules dependencies
+            echo "pkg_check_modules dependencies:" >> "${REPO_NAME}-dependency-report.md"
+            grep -n "pkg_check_modules" "$CMAKE_FILE" | while read -r line; do
+              echo "$line" >> "${REPO_NAME}-dependency-report.md"
+              # Extract package names
+              PKGS=$(echo "$line" | grep -oP 'pkg_check_modules\(\s*\K[^ \)]+')
+              for PKG in $PKGS; do
+                echo "$PKG" >> deps.tmp
+              done
+            done
+            
+            # 3. ExternalProject dependencies
+            echo "ExternalProject dependencies:" >> "${REPO_NAME}-dependency-report.md"
+            grep -n "ExternalProject_Add" "$CMAKE_FILE" | while read -r line; do
+              echo "$line" >> "${REPO_NAME}-dependency-report.md"
+              # Extract project name and URL
+              PROJ=$(echo "$line" | grep -oP 'ExternalProject_Add\(\s*\K[^ \)]+')
+              URL=$(grep -A 5 "ExternalProject_Add($PROJ" "$CMAKE_FILE" | grep -oP 'URL\s+\K[^ \)]+')
+              if [ ! -z "$PROJ" ]; then
+                echo "$PROJ${URL:+:$URL}" >> deps.tmp
+              fi
+            done
+            
+            # 4. FetchContent dependencies
+            echo "FetchContent dependencies:" >> "${REPO_NAME}-dependency-report.md"
+            grep -n "FetchContent_Declare" "$CMAKE_FILE" | while read -r line; do
+              echo "$line" >> "${REPO_NAME}-dependency-report.md"
+              # Extract project name and URL
+              PROJ=$(echo "$line" | grep -oP 'FetchContent_Declare\(\s*\K[^ \)]+')
+              URL=$(grep -A 5 "FetchContent_Declare($PROJ" "$CMAKE_FILE" | grep -oP 'URL\s+\K[^ \)]+')
+              if [ ! -z "$PROJ" ]; then
+                echo "$PROJ${URL:+:$URL}" >> deps.tmp
+              fi
+            done
+            
+            # 5. Custom find commands
+            echo "Custom find commands:" >> "${REPO_NAME}-dependency-report.md"
+            grep -n "find_library\|find_path\|find_program" "$CMAKE_FILE" | while read -r line; do
+              echo "$line" >> "${REPO_NAME}-dependency-report.md"
+              # Extract library/package name
+              PKG=$(echo "$line" | grep -oP 'find_[a-z]+\s*\K[^ \)]+')
+              if [ ! -z "$PKG" ]; then
+                echo "$PKG" >> deps.tmp
+              fi
+            done
+            
+            echo "" >> "${REPO_NAME}-dependency-report.md"
+          done < cmakefiles.tmp
+          
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
+          # Add summary of unique dependencies
+          echo "" >> "${REPO_NAME}-dependency-report.md"
+          echo "### Summary of Unique Dependencies" >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          sort -u deps.tmp >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
+          # Process CMake cache for version information
+          if [ -f "build/CMakeCache.txt" ]; then
+            echo "" >> "${REPO_NAME}-dependency-report.md"
+            echo "### CMake Cache - Dependency Versions" >> "${REPO_NAME}-dependency-report.md"
+            echo '```' >> "${REPO_NAME}-dependency-report.md"
+            grep -E "_VERSION|_FOUND" build/CMakeCache.txt | sort >> "${REPO_NAME}-dependency-report.md"
+            echo '```' >> "${REPO_NAME}-dependency-report.md"
+            
+            # Copy build information
+            mkdir -p dependency_info
             cp build/CMakeCache.txt dependency_info/
             [ -f build/compile_commands.json ] && cp build/compile_commands.json dependency_info/
           fi
+          
+          # Clean up
+          rm -f cmakefiles.tmp deps.tmp
         else
-          echo "No CMakeLists.txt files found in the project." >> ${REPO_NAME}-dependency-report.md
+          echo "No CMakeLists.txt files found in the project." >> "${REPO_NAME}-dependency-report.md"
         fi
 
     - name: Analyze Autotools Dependencies
       run: |
+        set -e
         REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
         
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "## Autotools Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> "${REPO_NAME}-dependency-report.md"
+        echo "## Autotools Dependencies" >> "${REPO_NAME}-dependency-report.md"
         
+        # Create a temporary file for dependency tracking
+        touch deps.tmp
+        
+        # Check for configure.ac or configure.in
         if [ -f "configure.ac" ] || [ -f "configure.in" ]; then
-          echo "### Configure Script Dependencies" >> ${REPO_NAME}-dependency-report.md
-          echo '```' >> ${REPO_NAME}-dependency-report.md
+          echo "### Configure Script Dependencies" >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
           for conf_file in configure.ac configure.in; do
             if [ -f "$conf_file" ]; then
-              echo "File: $conf_file" >> ${REPO_NAME}-dependency-report.md
-              grep -E "AC_CHECK_LIB|AC_SEARCH_LIBS|PKG_CHECK_MODULES" "$conf_file" >> ${REPO_NAME}-dependency-report.md
-              echo "" >> ${REPO_NAME}-dependency-report.md
+              echo "File: $conf_file" >> "${REPO_NAME}-dependency-report.md"
+              
+              # 1. Library Checks
+              echo "Library Checks:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "AC_CHECK_LIB" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract library name
+                LIB=$(echo "$line" | grep -oP 'AC_CHECK_LIB\(\s*\K[^,]+')
+                if [ ! -z "$LIB" ]; then
+                  echo "$LIB" >> deps.tmp
+                fi
+              done
+              
+              # 2. Library Search
+              echo "Library Search:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "AC_SEARCH_LIBS" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract function and libraries
+                FUNC=$(echo "$line" | grep -oP 'AC_SEARCH_LIBS\(\s*\K[^,]+')
+                LIBS=$(echo "$line" | grep -oP 'AC_SEARCH_LIBS\([^,]+\s*,\s*\K[^)]+')
+                if [ ! -z "$LIBS" ]; then
+                  echo "$LIBS" | tr -d '[]' | tr ',' '\n' | sed 's/^ *//;s/ *$//' >> deps.tmp
+                fi
+              done
+              
+              # 3. pkg-config Checks
+              echo "pkg-config Checks:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "PKG_CHECK_MODULES" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract package names and version requirements
+                PKGS=$(echo "$line" | grep -oP 'PKG_CHECK_MODULES\(\s*\K[^,]+')
+                VERSION=$(echo "$line" | grep -oP 'PKG_CHECK_MODULES\([^,]+\s*,\s*\K[^)]+')
+                if [ ! -z "$PKGS" ]; then
+                  echo "$PKGS${VERSION:+:$VERSION}" >> deps.tmp
+                fi
+              done
+              
+              # 4. Header Checks
+              echo "Header Checks:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "AC_CHECK_HEADERS" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract header names
+                HEADERS=$(echo "$line" | grep -oP 'AC_CHECK_HEADERS\(\s*\K[^)]+')
+                if [ ! -z "$HEADERS" ]; then
+                  echo "$HEADERS" | tr -d '[]' | tr ',' '\n' | sed 's/^ *//;s/ *$//' >> deps.tmp
+                fi
+              done
+              
+              # 5. Program Checks
+              echo "Program Checks:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "AC_CHECK_PROG\|AC_PATH_PROG" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract program names
+                PROG=$(echo "$line" | grep -oP 'AC_(CHECK|PATH)_PROG\(\s*\K[^,]+')
+                if [ ! -z "$PROG" ]; then
+                  echo "$PROG" >> deps.tmp
+                fi
+              done
+              
+              # 6. Feature Checks
+              echo "Feature Checks:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "AC_CHECK_FUNC\|AC_CHECK_FUNCS" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract function names
+                FUNCS=$(echo "$line" | grep -oP 'AC_CHECK_FUNC(S)?\(\s*\K[^)]+')
+                if [ ! -z "$FUNCS" ]; then
+                  echo "$FUNCS" | tr -d '[]' | tr ',' '\n' | sed 's/^ *//;s/ *$//' >> deps.tmp
+                fi
+              done
+              
+              # 7. Type Checks
+              echo "Type Checks:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "AC_CHECK_TYPES" "$conf_file" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract type names
+                TYPES=$(echo "$line" | grep -oP 'AC_CHECK_TYPES\(\s*\K[^)]+')
+                if [ ! -z "$TYPES" ]; then
+                  echo "$TYPES" | tr -d '[]' | tr ',' '\n' | sed 's/^ *//;s/ *$//' >> deps.tmp
+                fi
+              done
+              
+              echo "" >> "${REPO_NAME}-dependency-report.md"
             fi
           done
-          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
+          # Add summary of unique dependencies
+          echo "" >> "${REPO_NAME}-dependency-report.md"
+          echo "### Summary of Unique Dependencies" >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          sort -u deps.tmp >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
+          # Clean up
+          rm -f deps.tmp
+        else
+          echo "No Autotools configuration files found in the project." >> "${REPO_NAME}-dependency-report.md"
         fi
 
     - name: Analyze Make Dependencies
@@ -88,26 +263,113 @@ jobs:
         echo "" >> "${REPO_NAME}-dependency-report.md"
         echo "## Make Dependencies" >> "${REPO_NAME}-dependency-report.md"
         
+        # Create a temporary file for dependency tracking
+        touch deps.tmp
+        
         # Find Makefiles and store in a temporary file
         find . -name "Makefile" -o -name "makefile" -o -name "GNUmakefile" -not -path "*/build/*" -not -path "*/\.*" > makefiles.tmp
         
         if [ -s makefiles.tmp ]; then
           echo "### Makefile Dependencies" >> "${REPO_NAME}-dependency-report.md"
           echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
           while IFS= read -r MAKE_FILE; do
             echo "File: $MAKE_FILE" >> "${REPO_NAME}-dependency-report.md"
             if [ -f "$MAKE_FILE" ]; then
-              grep -E "LIBS|LDFLAGS|CPPFLAGS|PKG_CONFIG" "$MAKE_FILE" >> "${REPO_NAME}-dependency-report.md" || true
+              
+              # 1. Library Dependencies
+              echo "Library Dependencies:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "LIBS\|LDFLAGS" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract library names from -l flags
+                echo "$line" | grep -oP '-l\K[^ \t]+' | while read -r lib; do
+                  echo "$lib" >> deps.tmp
+                done
+              done
+              
+              # 2. Include Path Dependencies
+              echo "Include Path Dependencies:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "CPPFLAGS\|INCLUDES\|INCLUDE_DIRS" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract include paths from -I flags
+                echo "$line" | grep -oP '-I\K[^ \t]+' | while read -r inc; do
+                  echo "$inc" >> deps.tmp
+                done
+              done
+              
+              # 3. pkg-config Dependencies
+              echo "pkg-config Dependencies:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "PKG_CONFIG\|pkg-config" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract package names from pkg-config commands
+                echo "$line" | grep -oP 'pkg-config.*?--libs\s+\K[^ \t]+' | while read -r pkg; do
+                  echo "$pkg" >> deps.tmp
+                done
+              done
+              
+              # 4. External Commands
+              echo "External Commands:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "^\s*[A-Za-z0-9_]+:" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract commands that might indicate dependencies
+                echo "$line" | grep -oP ':\s*\K.*' | grep -E 'curl|wget|git|svn|apt-get|yum|brew|pip|npm' | while read -r cmd; do
+                  echo "$cmd" >> deps.tmp
+                done
+              done
+              
+              # 5. Variable Dependencies
+              echo "Variable Dependencies:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "^\s*[A-Za-z0-9_]+\s*[+:]?=" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract variables that might contain dependency information
+                VAR=$(echo "$line" | grep -oP '^\s*\K[A-Za-z0-9_]+')
+                VAL=$(echo "$line" | grep -oP '=\s*\K.*')
+                if [[ "$VAR" =~ (DEPS|DEPENDENCIES|REQUIREMENTS|PACKAGES) ]]; then
+                  echo "$VAL" | tr ' ' '\n' | grep -v '^$' >> deps.tmp
+                fi
+              done
+              
+              # 6. Conditional Dependencies
+              echo "Conditional Dependencies:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "ifeq\|ifneq\|ifdef\|ifndef" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract conditions that might indicate optional dependencies
+                COND=$(echo "$line" | grep -oP 'ifeq\|ifneq\|ifdef\|ifndef\s+\K[^)]+')
+                if [[ "$COND" =~ (HAVE_|WITH_|USE_) ]]; then
+                  echo "$COND" >> deps.tmp
+                fi
+              done
+              
+              # 7. Target Dependencies
+              echo "Target Dependencies:" >> "${REPO_NAME}-dependency-report.md"
+              grep -n "^\s*[A-Za-z0-9_]+:" "$MAKE_FILE" | while read -r line; do
+                echo "$line" >> "${REPO_NAME}-dependency-report.md"
+                # Extract prerequisites that might be external dependencies
+                TARGET=$(echo "$line" | grep -oP '^\s*\K[A-Za-z0-9_]+')
+                DEPS=$(echo "$line" | grep -oP ':\s*\K.*')
+                if [[ "$DEPS" =~ (\.so|\.a|\.dylib|\.dll) ]]; then
+                  echo "$DEPS" | tr ' ' '\n' | grep -E '\.(so|a|dylib|dll)' >> deps.tmp
+                fi
+              done
+              
+              echo "" >> "${REPO_NAME}-dependency-report.md"
             fi
-            echo "" >> "${REPO_NAME}-dependency-report.md"
           done < makefiles.tmp
+          
           echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
+          # Add summary of unique dependencies
+          echo "" >> "${REPO_NAME}-dependency-report.md"
+          echo "### Summary of Unique Dependencies" >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          sort -u deps.tmp >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          
+          # Clean up
+          rm -f makefiles.tmp deps.tmp
         else
           echo "No Makefiles found in the project." >> "${REPO_NAME}-dependency-report.md"
         fi
-        
-        # Clean up
-        rm -f makefiles.tmp
 
     - name: Generate Conanfile for Build System Dependencies
       run: |
