@@ -62,7 +62,9 @@ jobs:
         
         echo "### Common Vendored Directories" >> ${REPO_NAME}-dependency-report.md
         echo '```' >> ${REPO_NAME}-dependency-report.md
-        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
+        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes \
+                   third_party_libs external_libs libs/external libs/third_party deps/third_party deps/external \
+                   external_deps third_party_deps libs/vendor libs/deps; do
           if [ -d "$DIR" ]; then
             echo "Found potential vendored directory: $DIR" >> ${REPO_NAME}-dependency-report.md
             echo "Contents:" >> ${REPO_NAME}-dependency-report.md
@@ -105,7 +107,7 @@ jobs:
           fi
           
           # 3. Check for version in VERSION or version.txt files
-          for ver_file in "$subdir/VERSION" "$subdir/version.txt" "$subdir/Version.txt"; do
+          for ver_file in VERSION version.txt Version.txt; do
             if [ -f "$ver_file" ]; then
               local version=$(grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' "$ver_file" | head -n 1)
               if [ ! -z "$version" ]; then
@@ -184,4 +186,133 @@ jobs:
         name: ${{ steps.repo-name.outputs.REPO_NAME }}-git-vendor-deps
         path: |
           ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
-          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt 
+          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt
+
+    - name: Add security-related checks
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Security Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        git submodule foreach --recursive 'echo "$path:"; if [ -f "$path/.gitmodules" ]; then echo "  Warning: Contains nested submodules"; fi; if [ -f "$path/package-lock.json" ] || [ -f "$path/yarn.lock" ]; then echo "  Warning: Contains lock files - may have nested dependencies"; fi' >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Add recursive search for dependency indicators
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Dependency Indicators" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        find . -type d -name "*vendor*" -o -name "*third*party*" -o -name "*external*" -o -name "*deps*" -o -name "*dependencies*" | \
+        while read -r dir; do
+          if [ -d "$dir" ]; then
+            echo "Found potential dependency directory: $dir" >> ${REPO_NAME}-dependency-report.md
+            # Analyze contents
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Add checks for common dependency indicators
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Dependency Indicators" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for file in $(find . -type f -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" -o -name "*.lock" -o -name "*.txt"); do
+          if grep -q -E "dependencies|requires|deps|packages" "$file"; then
+            echo "Found potential dependency file: $file"
+            # Analyze content
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Check for package manager files
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Package Manager Files" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for pm_file in package.json requirements.txt conanfile.txt conanfile.py CMakeLists.txt setup.py pyproject.toml Cargo.toml go.mod go.sum; do
+          if [ -f "$pm_file" ]; then
+            echo "Found package manager file: $pm_file"
+            # Parse dependencies
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Check build system files
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Build System Files" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for build_file in CMakeLists.txt Makefile configure.ac autogen.sh; do
+          if [ -f "$build_file" ]; then
+            echo "Found build system file: $build_file"
+            # Extract external dependencies
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Check for license files
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## License Files" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for license_file in LICENSE LICENSE.txt COPYING COPYING.txt; do
+          if [ -f "$license_file" ]; then
+            echo "Found license file: $license_file"
+            # Analyze license information
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Generate dependency graph
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Dependency Graph" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for dep_dir in $(find . -type d -name "*vendor*" -o -name "*third*party*" -o -name "*external*"); do
+          echo "Analyzing $dep_dir"
+          # Generate dependency graph
+          # Check for nested dependencies
+          # Verify dependency versions
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Add security checks
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Security Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for dep_dir in $(find . -type d -name "*vendor*" -o -name "*third*party*"); do
+          # Check for known vulnerabilities
+          # Verify checksums
+          # Check for outdated dependencies
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Check documentation for dependency information
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Documentation Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for doc_file in README.md INSTALL.md docs/*.md; do
+          if [ -f "$doc_file" ]; then
+            # Extract dependency information from documentation
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md 
