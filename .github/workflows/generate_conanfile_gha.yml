@@ -1,62 +1,577 @@
-  - name: Generate Dependency Report
-    run: |
-      cd scripts-repo/scripts
-      python generate_dependency_report.py ${{ github.workspace }}/target-repo --auto-detect --debug --log-level DEBUG
-  
-  - name: Extract Version Information from Commits
-    run: |
-      cd target-repo
-      
-      # Create a temporary file to store version mappings
-      VERSION_MAP=$(mktemp)
-      
-      # Function to get version from commit hash
-      get_version_from_commit() {
-        local commit_hash=$1
-        local dep_name=$2
-        
-        # First try to find a tag pointing to this commit
-        local tag=$(git tag --points-at $commit_hash | grep -E "^v?[0-9]+\.[0-9]+(\.[0-9]+)?$" | head -n 1)
-        
-        if [ ! -z "$tag" ]; then
-          # Clean up the tag to get just the version number
-          local version=$(echo $tag | sed 's/^v//')
-          echo "$dep_name:$version" >> $VERSION_MAP
-          return
+name: C/C++ Build (Ubuntu)
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Ubuntu Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install basic build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake ninja-build pkg-config
+
+    - name: Auto-detect and install dependencies
+      run: |
+        # If a dependencies.txt file exists, use it to install dependencies
+        if [ -f "dependencies.txt" ]; then
+          sudo apt-get install -y $(cat dependencies.txt)
         fi
         
-        # If no tag found, try to find the closest tag
-        local closest_tag=$(git describe --tags --abbrev=0 $commit_hash 2>/dev/null)
-        if [ ! -z "$closest_tag" ]; then
-          local version=$(echo $closest_tag | sed 's/^v//')
-          echo "$dep_name:$version" >> $VERSION_MAP
-          return
+        # If there's a CMake file, extract and install dependencies
+        if [ -f "CMakeLists.txt" ]; then
+          # Extract package dependencies from CMake files
+          CMAKE_DEPS=$(grep -E "find_package|pkg_check_modules" CMakeLists.txt | grep -oE '[A-Za-z0-9_-]+' | sort | uniq)
+          if [ ! -z "$CMAKE_DEPS" ]; then
+            echo "Detected CMake dependencies: $CMAKE_DEPS"
+            # Try to install common mappings from CMake module names to apt package names
+            for DEP in $CMAKE_DEPS; do
+              case $DEP in
+                Boost)
+                  sudo apt-get install -y libboost-all-dev
+                  ;;
+                ZLIB)
+                  sudo apt-get install -y zlib1g-dev
+                  ;;
+                OpenSSL)
+                  sudo apt-get install -y libssl-dev
+                  ;;
+                Threads)
+                  # Usually built-in
+                  ;;
+                Qt5|Qt6)
+                  sudo apt-get install -y qtbase5-dev
+                  ;;
+                CURL)
+                  sudo apt-get install -y libcurl4-openssl-dev
+                  ;;
+                *)
+                  # Try to guess package name (lowercase with lib prefix and -dev suffix)
+                  GUESS_PKG="lib$(echo $DEP | tr '[:upper:]' '[:lower:]')-dev"
+                  echo "Trying to install: $GUESS_PKG"
+                  sudo apt-get install -y $GUESS_PKG || true
+                  ;;
+              esac
+            done
+          fi
         fi
         
-        # If still no version found, keep the commit hash
-        echo "$dep_name:$commit_hash" >> $VERSION_MAP
-      }
-      
-      # Process the conanfile.txt to extract dependencies and their commit hashes
-      while IFS='/' read -r dep_name commit_hash; do
-        # Clean up the commit hash (remove any comments)
-        commit_hash=$(echo $commit_hash | cut -d' ' -f1)
-        get_version_from_commit "$commit_hash" "$dep_name"
-      done < <(grep -E "^[^#].*/[0-9a-f]{7,}" conanfile.txt)
-      
-      # Update the conanfile.txt with version information
-      while IFS=':' read -r dep_name version; do
-        # Replace the commit hash with the version in conanfile.txt
-        sed -i "s|^$dep_name/[0-9a-f]\{7,\}.*|$dep_name/$version # Version from git tag|" conanfile.txt
-      done < $VERSION_MAP
-      
-      # Clean up
-      rm $VERSION_MAP
-  
-  - name: Upload Artifacts
-    uses: actions/upload-artifact@v4
-    with:
-      name: dependency-files
-      path: |
-        target-repo/dependency_report.md
-        target-repo/conanfile.txt 
+        # If configure script exists, check for dependencies
+        if [ -f "configure" ]; then
+          # Run configure with --help to extract dependencies
+          CONFIGURE_DEPS=$(./configure --help | grep -E 'with-[a-z0-9_-]+' | grep -oE 'with-[a-z0-9_-]+' | sed 's/with-//g')
+          if [ ! -z "$CONFIGURE_DEPS" ]; then
+            echo "Detected configure dependencies: $CONFIGURE_DEPS"
+            # Try to install based on common naming patterns
+            for DEP in $CONFIGURE_DEPS; do
+              GUESS_PKG="lib$(echo $DEP | tr '[:upper:]' '[:lower:]')-dev"
+              echo "Trying to install: $GUESS_PKG"
+              sudo apt-get install -y $GUESS_PKG || true
+            done
+          fi
+        fi
+        
+        # If vcpkg.json exists, extract dependencies
+        if [ -f "vcpkg.json" ]; then
+          VCPKG_DEPS=$(grep -Eo '"dependencies"[^]]*]' vcpkg.json | grep -Eo '"[^"]*"' | sed 's/"//g' | grep -v dependencies)
+          if [ ! -z "$VCPKG_DEPS" ]; then
+            echo "Detected vcpkg dependencies: $VCPKG_DEPS"
+            # Try to map vcpkg package names to apt packages
+            for DEP in $VCPKG_DEPS; do
+              GUESS_PKG="lib$(echo $DEP | tr '[:upper:]' '[:lower:]')-dev"
+              echo "Trying to install: $GUESS_PKG"
+              sudo apt-get install -y $GUESS_PKG || true
+            done
+          fi
+        fi
+        
+        # If conanfile.txt or conanfile.py exists, use Conan to handle dependencies
+        if [ -f "conanfile.txt" ] || [ -f "conanfile.py" ]; then
+          echo "Conan package manager detected, installing Conan..."
+          pip install conan
+          # Conan will handle the dependencies during the build step
+        fi
+
+    - name: Check build system
+      id: check_build
+      run: |
+        # Check for different build systems and set outputs accordingly
+        if [ -f "CMakeLists.txt" ]; then
+          echo "HAS_CMAKE=true" >> $GITHUB_OUTPUT
+        else
+          echo "HAS_CMAKE=false" >> $GITHUB_OUTPUT
+          echo "No CMakeLists.txt found in root directory. Will skip CMake build."
+        fi
+        
+        if [ -f "configure" ] || [ -f "configure.ac" ] || [ -f "autogen.sh" ]; then
+          echo "HAS_AUTOTOOLS=true" >> $GITHUB_OUTPUT
+        else
+          echo "HAS_AUTOTOOLS=false" >> $GITHUB_OUTPUT
+        fi
+        
+        if [ -f "Makefile" ] || [ -f "makefile" ] || [ -f "GNUmakefile" ]; then
+          echo "HAS_MAKEFILE=true" >> $GITHUB_OUTPUT
+        else
+          echo "HAS_MAKEFILE=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Create build directory regardless of build system
+        mkdir -p build
+
+    - name: Configure and build with CMake
+      if: steps.check_build.outputs.HAS_CMAKE == 'true'
+      run: |
+        cd build
+        
+        # If using Conan, install dependencies first
+        if [ -f "../conanfile.txt" ] || [ -f "../conanfile.py" ]; then
+          conan install .. --build=missing
+        fi
+        
+        # Find CMakeLists.txt location (it might be in a subdirectory)
+        CMAKE_DIR=".."
+        if [ ! -f "../CMakeLists.txt" ]; then
+          # Try to find the directory containing CMakeLists.txt
+          CMAKE_DIR_FOUND=$(find .. -name "CMakeLists.txt" -not -path "*/build/*" -not -path "*/\.*" | head -n 1 | xargs dirname || echo "")
+          if [ ! -z "$CMAKE_DIR_FOUND" ]; then
+            CMAKE_DIR="$CMAKE_DIR_FOUND"
+            echo "Found CMakeLists.txt in $CMAKE_DIR"
+          fi
+        fi
+        
+        # Attempt CMake configuration and build
+        cmake "$CMAKE_DIR" -DCMAKE_BUILD_TYPE=Release -G Ninja || echo "CMake configuration failed, continuing anyway"
+        cmake --build . --config Release || echo "CMake build failed, continuing anyway"
+      continue-on-error: true
+
+    - name: Build with Autotools
+      if: steps.check_build.outputs.HAS_AUTOTOOLS == 'true'
+      run: |
+        # If autogen.sh exists, run it first
+        if [ -f "autogen.sh" ]; then
+          chmod +x autogen.sh
+          ./autogen.sh || echo "autogen.sh failed, continuing anyway"
+        fi
+        
+        # If configure.ac exists but no configure, run autoconf
+        if [ -f "configure.ac" ] && [ ! -f "configure" ]; then
+          autoreconf -i || echo "autoreconf failed, continuing anyway"
+        fi
+        
+        # Check if this is a TensorFlow-like repo with an interactive configure script
+        if [ -f "configure" ]; then
+          # Check if this is TensorFlow or similar that needs non-interactive answers
+          if grep -q "TensorFlow\|CUDA\|ROCm\|Python" configure; then
+            echo "Detected TensorFlow-like configure script. Running in non-interactive mode..."
+            # Create a response file for interactive prompts
+            cat > /tmp/tf_responses << EOF
+            
+
+            
+            
+            n
+            n
+            Y
+            
+            
+            n
+            EOF
+            # Run configure with automatic responses
+            cat /tmp/tf_responses | ./configure || echo "configure failed, continuing anyway"
+          else
+            # Try running configure normally, but don't fail if it has problems
+            chmod +x configure
+            ./configure || echo "configure failed, continuing anyway"
+          fi
+          
+          # Check if Makefile was created or already exists
+          if [ -f "Makefile" ]; then
+            echo "Makefile found. Running make..."
+            make || echo "make failed, continuing anyway"
+          else
+            echo "No Makefile found after configure. Checking for other build systems..."
+            # Try to detect if this is a Bazel project
+            if [ -f "WORKSPACE" ] || [ -f "BUILD" ] || [ -f "BUILD.bazel" ]; then
+              echo "Detected Bazel build system. Skipping make."
+              # Optionally run a basic Bazel build if needed
+              # bazel build //... --config=opt || echo "bazel build failed, continuing anyway"
+            else
+              echo "No recognized build system found after configure."
+            fi
+          fi
+        fi
+      continue-on-error: true
+
+    - name: Build with Make
+      if: steps.check_build.outputs.HAS_MAKEFILE == 'true'
+      run: |
+        make
+      continue-on-error: true
+
+    - name: Initialize Dependency Report
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "# Dependency Report" > ${REPO_NAME}-dependency-report.md
+        echo "Generated on $(date)" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        
+        # Create directory to store detailed dependency information
+        mkdir -p dependency_info
+
+    - name: Collect System Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "## System Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo "Listing installed apt packages:" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        dpkg-query -W -f='${binary:Package} ${Version}\n' | sort >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Analyze Git Submodules
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Git Submodules" >> ${REPO_NAME}-dependency-report.md
+        if [ -f ".gitmodules" ]; then
+          echo "### Detected Git Submodules" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          cat .gitmodules >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Submodule Versions (Commit Hashes)" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          git submodule status >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "Could not get submodule status" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Detailed Submodule Information" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          git submodule foreach 'echo "Submodule: $name"; git log -n 1 --pretty=format:"%h %s %ad" --date=short; echo ""; if [ -f "VERSION" ]; then echo "VERSION file: $(cat VERSION)"; fi; if [ -f "version.txt" ]; then echo "version.txt: $(cat version.txt)"; fi; echo ""' 2>/dev/null || echo "Could not get detailed submodule info" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+        else
+          echo "No .gitmodules file found. Repository does not use git submodules." >> ${REPO_NAME}-dependency-report.md
+        fi
+
+    - name: Analyze Vendored Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Vendored Dependencies" >> ${REPO_NAME}-dependency-report.md
+        
+        echo "### Common Vendored Directories" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
+          if [ -d "$DIR" ]; then
+            echo "Found potential vendored directory: $DIR" >> ${REPO_NAME}-dependency-report.md
+            echo "Contents:" >> ${REPO_NAME}-dependency-report.md
+            ls -la "$DIR" >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Analyze LLVM Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "### LLVM-Specific Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for DEP in googletest gtest zlib; do
+          if [ -d "$DEP" ] || [ -d "lib$DEP" ]; then
+            echo "Found $DEP library" >> ${REPO_NAME}-dependency-report.md
+            find . -path "*/$DEP/*" -o -path "*/lib$DEP/*" | grep -E 'version\.h|VERSION|version\.txt|README|CHANGELOG|CMakeLists.txt' | while read -r file; do
+              if [ -f "$file" ]; then
+                echo "Version information from $file:" >> ${REPO_NAME}-dependency-report.md
+                grep -i -E "version|release" "$file" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No version info found" >> ${REPO_NAME}-dependency-report.md
+              fi
+            done
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Run OSV Scanner
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "### OSV Version Detection" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        python3 -m pip install --user osv 2>/dev/null || echo "Could not install OSV scanner" >> ${REPO_NAME}-dependency-report.md
+        if command -v osv-scanner &> /dev/null; then
+          echo "Running OSV scanner to detect vendored package versions..." >> ${REPO_NAME}-dependency-report.md
+          osv-scanner scan --recursive . >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "OSV scanner failed or found no results" >> ${REPO_NAME}-dependency-report.md
+        else
+          echo "OSV scanner not available. Could not scan for vendored package versions." >> ${REPO_NAME}-dependency-report.md
+        fi
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Analyze CMake Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
+        CMAKE_FILES=$(find . -name "CMakeLists.txt" -not -path "*/build/*" -not -path "*/\.*")
+        if [ ! -z "$CMAKE_FILES" ]; then
+          echo "### Direct CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          for CMAKE_FILE in $CMAKE_FILES; do
+            echo "File: $CMAKE_FILE" >> ${REPO_NAME}-dependency-report.md
+            {
+              grep -n "find_package" "$CMAKE_FILE" || echo "No find_package found"
+              grep -n "pkg_check_modules" "$CMAKE_FILE" || echo "No pkg_check_modules found"
+            } >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+          done
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          if [ -f "build/CMakeCache.txt" ]; then
+            echo "" >> ${REPO_NAME}-dependency-report.md
+            echo "### CMake Cache - Dependency Versions" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            grep -E "_VERSION|_FOUND" build/CMakeCache.txt | sort >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            
+            cp build/CMakeCache.txt dependency_info/
+            [ -f build/compile_commands.json ] && cp build/compile_commands.json dependency_info/
+          fi
+        else
+          echo "No CMakeLists.txt files found in the project." >> ${REPO_NAME}-dependency-report.md
+        fi
+
+    - name: Analyze Conan Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        if [ -f "conanfile.txt" ] || [ -f "conanfile.py" ]; then
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "## Conan Dependencies" >> ${REPO_NAME}-dependency-report.md
+          
+          echo "### Conan Direct Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          if [ -f "conanfile.txt" ]; then
+            cat conanfile.txt >> ${REPO_NAME}-dependency-report.md
+          else
+            cat conanfile.py >> ${REPO_NAME}-dependency-report.md
+          fi
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Conan Dependency Graph" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          (cd build && conan info .. 2>/dev/null) >> ${REPO_NAME}-dependency-report.md || echo "Could not generate Conan info" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          [ -f "build/conanbuildinfo.txt" ] && cp build/conanbuildinfo.txt dependency_info/
+          [ -f "build/conaninfo.txt" ] && cp build/conaninfo.txt dependency_info/
+        fi
+
+    - name: Analyze vcpkg Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        if [ -f "vcpkg.json" ]; then
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "## vcpkg Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo "### vcpkg Direct Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```json' >> ${REPO_NAME}-dependency-report.md
+          cat vcpkg.json >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          if [ -d "build/vcpkg_installed" ]; then
+            echo "" >> ${REPO_NAME}-dependency-report.md
+            echo "### Installed vcpkg Packages" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            find build/vcpkg_installed -name "CONTROL" -o -name "vcpkg_abi_info.txt" | xargs cat 2>/dev/null >> ${REPO_NAME}-dependency-report.md || echo "No detailed vcpkg info found" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+          fi
+        fi
+
+    - name: Analyze Source Code Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Source Code Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo "### Include Statements" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        find . -type f -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" | xargs grep -l "#include" 2>/dev/null | head -n 50 | xargs grep "#include" 2>/dev/null | sort | uniq -c | sort -nr >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No C/C++ includes found" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Analyze Binary Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Binary Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo "### Shared Library Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        find . -type f -executable -not -path "*/\.*" | head -n 20 | xargs -I{} bash -c "echo 'File: {}'; ldd {} 2>/dev/null || echo 'Not a dynamic executable'" >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "No binaries found or ldd not available" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Create Dependency Archive
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        tar -czf dependency_info.tar.gz dependency_info ${REPO_NAME}-dependency-report.md
+        echo "Dependency report generated at ${REPO_NAME}-dependency-report.md"
+      continue-on-error: true
+
+    - name: Generate Conanfile
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        # Create conanfile.txt
+        echo "[requires]" > ${REPO_NAME}-conanfile.txt
+        
+        # Extract system package dependencies
+        echo "# System Package Dependencies" >> ${REPO_NAME}-conanfile.txt
+        dpkg-query -W -f='${binary:Package}\n' | grep -E '^lib.*-dev$' | sed 's/-dev$//' | while read -r pkg; do
+          case $pkg in
+            libboost*)
+              VERSION=$(dpkg-query -W -f='${Version}' libboost-dev | cut -d. -f1-2)
+              echo "boost/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libzlib*)
+              VERSION=$(dpkg-query -W -f='${Version}' zlib1g-dev | cut -d- -f1)
+              echo "zlib/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libssl*)
+              VERSION=$(dpkg-query -W -f='${Version}' libssl-dev | cut -d- -f1)
+              echo "openssl/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libcurl*)
+              VERSION=$(dpkg-query -W -f='${Version}' libcurl4-openssl-dev | cut -d- -f1)
+              echo "libcurl/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libmysqlclient*)
+              VERSION=$(dpkg-query -W -f='${Version}' libmysqlclient-dev | cut -d- -f1)
+              echo "mysqlclient/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            libpq*)
+              VERSION=$(dpkg-query -W -f='${Version}' libpq-dev | cut -d- -f1)
+              echo "pq/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              ;;
+            *)
+              # Try to map other packages
+              CONAN_PKG=$(echo $pkg | sed 's/^lib//')
+              VERSION=$(dpkg-query -W -f='${Version}' ${pkg}-dev 2>/dev/null | cut -d- -f1)
+              if [ ! -z "$VERSION" ]; then
+                echo "${CONAN_PKG}/${VERSION}" >> ${REPO_NAME}-conanfile.txt
+              fi
+              ;;
+          esac
+        done
+        
+        # Extract vendored dependencies and their versions
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
+        
+        # Function to get version from commit hash
+        get_version_from_commit() {
+          local commit_hash=$1
+          local dep_name=$2
+          
+          # First try to find a tag pointing to this commit
+          local tag=$(git tag --points-at $commit_hash | grep -E "^v?[0-9]+\.[0-9]+(\.[0-9]+)?$" | head -n 1)
+          
+          if [ ! -z "$tag" ]; then
+            # Clean up the tag to get just the version number
+            local version=$(echo $tag | sed 's/^v//')
+            echo "${dep_name}/${version} # Version from git tag" >> ${REPO_NAME}-conanfile.txt
+            return
+          fi
+          
+          # If no tag found, try to find the closest tag
+          local closest_tag=$(git describe --tags --abbrev=0 $commit_hash 2>/dev/null)
+          if [ ! -z "$closest_tag" ]; then
+            local version=$(echo $closest_tag | sed 's/^v//')
+            echo "${dep_name}/${version} # Version from closest git tag" >> ${REPO_NAME}-conanfile.txt
+            return
+          fi
+          
+          # If still no version found, keep the commit hash
+          echo "${dep_name}/${commit_hash} # Version determined via Git commit hash" >> ${REPO_NAME}-conanfile.txt
+        }
+
+        # Process vendored dependencies
+        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
+          if [ -d "$DIR" ]; then
+            for SUBDIR in $(find "$DIR" -maxdepth 1 -type d | grep -v "^$DIR$"); do
+              DEP_NAME=$(basename "$SUBDIR")
+              # Skip common non-dependency directories
+              if [[ "$DEP_NAME" != "CMakeFiles" && \
+                    "$DEP_NAME" != "include" && \
+                    "$DEP_NAME" != "src" && \
+                    "$DEP_NAME" != "test" && \
+                    "$DEP_NAME" != "tests" && \
+                    "$DEP_NAME" != "utils" && \
+                    "$DEP_NAME" != "lib" && \
+                    "$DEP_NAME" != "tools" && \
+                    "$DEP_NAME" != "docs" && \
+                    "$DEP_NAME" != "examples" ]]; then
+                # Get the latest commit hash for this directory
+                COMMIT_HASH=$(git log -n 1 --pretty=format:"%H" -- "$SUBDIR" 2>/dev/null)
+                if [ ! -z "$COMMIT_HASH" ]; then
+                  get_version_from_commit "$COMMIT_HASH" "$DEP_NAME"
+                fi
+              fi
+            done
+          fi
+        done
+
+        # Add build requirements with version source
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[build_requires]" >> ${REPO_NAME}-conanfile.txt
+        echo "cmake/3.27.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        echo "ninja/1.11.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        
+        # Add generator
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[generators]" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeDeps" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeToolchain" >> ${REPO_NAME}-conanfile.txt
+        
+        echo "Generated ${REPO_NAME}-conanfile.txt"
+      continue-on-error: true
+        
+    - name: Get repository name
+      id: repo-name
+      run: echo "REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_OUTPUT
+
+    - name: Download workflow log
+      run: |
+        # Get the current workflow run ID
+        RUN_ID=${{ github.run_id }}
+        # Get the repository name
+        REPO_NAME=${{ steps.repo-name.outputs.REPO_NAME }}
+        # Download the workflow log using GitHub API
+        curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+             -H "Accept: application/vnd.github.v3+json" \
+             "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/logs" \
+             -o "${REPO_NAME}-gha.log" || echo "Could not download workflow log"
+
+    - name: Upload dependency report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report
+        path: |
+          ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
+          dependency_info.tar.gz
+          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt
+          ${{ steps.repo-name.outputs.REPO_NAME }}-gha.log
