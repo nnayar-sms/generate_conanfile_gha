@@ -486,8 +486,9 @@ jobs:
         get_version_from_commit() {
           local commit_hash=$1
           local dep_name=$2
+          local subdir=$3
           
-          # First try to find a tag pointing to this commit
+          # 1. Try to find a tag pointing to this commit
           local tag=$(git tag --points-at $commit_hash | grep -E "^v?[0-9]+\.[0-9]+(\.[0-9]+)?$" | head -n 1)
           
           if [ ! -z "$tag" ]; then
@@ -497,7 +498,7 @@ jobs:
             return
           fi
           
-          # If no tag found, try to find the closest tag
+          # 2. Try to find the closest tag
           local closest_tag=$(git describe --tags --abbrev=0 $commit_hash 2>/dev/null)
           if [ ! -z "$closest_tag" ]; then
             local version=$(echo $closest_tag | sed 's/^v//')
@@ -505,7 +506,66 @@ jobs:
             return
           fi
           
-          # If still no version found, keep the commit hash
+          # 3. Check for version in CMakeLists.txt
+          if [ -f "$subdir/CMakeLists.txt" ]; then
+            local version=$(grep -E "VERSION|version|project.*VERSION" "$subdir/CMakeLists.txt" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+            if [ ! -z "$version" ]; then
+              echo "${dep_name}/${version} # Version from CMakeLists.txt" >> ${REPO_NAME}-conanfile.txt
+              return
+            fi
+          fi
+          
+          # 4. Check for version in configure.ac or configure.in
+          for conf_file in "$subdir/configure.ac" "$subdir/configure.in"; do
+            if [ -f "$conf_file" ]; then
+              local version=$(grep -E "AC_INIT|AM_INIT_AUTOMAKE" "$conf_file" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+              if [ ! -z "$version" ]; then
+                echo "${dep_name}/${version} # Version from configure.ac" >> ${REPO_NAME}-conanfile.txt
+                return
+              fi
+            fi
+          done
+          
+          # 5. Check for version in VERSION or version.txt files
+          for ver_file in "$subdir/VERSION" "$subdir/version.txt" "$subdir/Version.txt"; do
+            if [ -f "$ver_file" ]; then
+              local version=$(grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' "$ver_file" | head -n 1)
+              if [ ! -z "$version" ]; then
+                echo "${dep_name}/${version} # Version from version file" >> ${REPO_NAME}-conanfile.txt
+                return
+              fi
+            fi
+          done
+          
+          # 6. Check for version in header files
+          for header in $(find "$subdir" -type f -name "*.h" -o -name "*.hpp" | head -n 5); do
+            local version=$(grep -E "#define.*VERSION|VERSION.*[0-9]" "$header" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+            if [ ! -z "$version" ]; then
+              echo "${dep_name}/${version} # Version from header file" >> ${REPO_NAME}-conanfile.txt
+              return
+            fi
+          done
+          
+          # 7. Check for version in README or CHANGELOG
+          for doc_file in "$subdir/README.md" "$subdir/README" "$subdir/CHANGELOG.md" "$subdir/CHANGELOG"; do
+            if [ -f "$doc_file" ]; then
+              local version=$(grep -E "version|Version|Release" "$doc_file" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+              if [ ! -z "$version" ]; then
+                echo "${dep_name}/${version} # Version from documentation" >> ${REPO_NAME}-conanfile.txt
+                return
+              fi
+            fi
+          done
+          
+          # 8. Check for version in git commit message
+          local commit_msg=$(git log -n 1 --pretty=format:"%s" $commit_hash 2>/dev/null)
+          local version=$(echo "$commit_msg" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+          if [ ! -z "$version" ]; then
+            echo "${dep_name}/${version} # Version from commit message" >> ${REPO_NAME}-conanfile.txt
+            return
+          fi
+          
+          # 9. If all else fails, use the commit hash
           echo "${dep_name}/${commit_hash} # Version determined via Git commit hash" >> ${REPO_NAME}-conanfile.txt
         }
 
@@ -528,7 +588,7 @@ jobs:
                 # Get the latest commit hash for this directory
                 COMMIT_HASH=$(git log -n 1 --pretty=format:"%H" -- "$SUBDIR" 2>/dev/null)
                 if [ ! -z "$COMMIT_HASH" ]; then
-                  get_version_from_commit "$COMMIT_HASH" "$DEP_NAME"
+                  get_version_from_commit "$COMMIT_HASH" "$DEP_NAME" "$SUBDIR"
                 fi
               fi
             done
