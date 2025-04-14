@@ -99,6 +99,8 @@ jobs:
           pip install conan
           # Conan will handle the dependencies during the build step
         fi
+      continue-on-error: true
+
 
     - name: Check build system
       id: check_build
