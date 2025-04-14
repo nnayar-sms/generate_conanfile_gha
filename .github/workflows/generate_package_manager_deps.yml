@@ -1,0 +1,122 @@
+name: Generate Package Manager Dependencies Report
+
+on:
+  workflow_call:
+
+jobs:
+  analyze_dependencies:
+    name: Analyze Package Manager Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Initialize Dependency Report
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "# Dependency Report" > ${REPO_NAME}-dependency-report.md
+        echo "Generated on $(date)" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        
+        # Create directory to store detailed dependency information
+        mkdir -p dependency_info
+
+    - name: Analyze Conan Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        if [ -f "conanfile.txt" ] || [ -f "conanfile.py" ]; then
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "## Conan Dependencies" >> ${REPO_NAME}-dependency-report.md
+          
+          echo "### Conan Direct Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          if [ -f "conanfile.txt" ]; then
+            cat conanfile.txt >> ${REPO_NAME}-dependency-report.md
+          else
+            cat conanfile.py >> ${REPO_NAME}-dependency-report.md
+          fi
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Conan Dependency Graph" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          pip install conan
+          conan info . 2>/dev/null >> ${REPO_NAME}-dependency-report.md || echo "Could not generate Conan info" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          # Save Conan info files
+          conan info . --json=conan-info.json 2>/dev/null && cp conan-info.json dependency_info/
+        fi
+
+    - name: Analyze vcpkg Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        if [ -f "vcpkg.json" ]; then
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "## vcpkg Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo "### vcpkg Direct Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```json' >> ${REPO_NAME}-dependency-report.md
+          cat vcpkg.json >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          # Save vcpkg.json
+          cp vcpkg.json dependency_info/
+        fi
+
+    - name: Generate Conanfile for Package Manager Dependencies
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        # Create conanfile.txt
+        echo "[requires]" > ${REPO_NAME}-conanfile.txt
+        
+        # Process Conan dependencies
+        if [ -f "conanfile.txt" ]; then
+          echo "# Conan Dependencies" >> ${REPO_NAME}-conanfile.txt
+          grep -v "^#" conanfile.txt | grep -v "^$" >> ${REPO_NAME}-conanfile.txt
+        elif [ -f "conanfile.py" ]; then
+          echo "# Conan Dependencies" >> ${REPO_NAME}-conanfile.txt
+          # Extract requires from conanfile.py
+          python3 -c "import re; f=open('conanfile.py'); content=f.read(); f.close(); requires=re.findall(r'requires\s*=\s*\[(.*?)\]', content, re.DOTALL); print('\n'.join([r.strip().strip('\"\'') for r in requires[0].split(',')]))" >> ${REPO_NAME}-conanfile.txt
+        fi
+        
+        # Process vcpkg dependencies
+        if [ -f "vcpkg.json" ]; then
+          echo "" >> ${REPO_NAME}-conanfile.txt
+          echo "# vcpkg Dependencies" >> ${REPO_NAME}-conanfile.txt
+          # Extract dependencies from vcpkg.json
+          python3 -c "import json; f=open('vcpkg.json'); data=json.load(f); f.close(); print('\n'.join([f'{dep}/latest' for dep in data.get('dependencies', [])]))" >> ${REPO_NAME}-conanfile.txt
+        fi
+        
+        # Add build requirements
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[build_requires]" >> ${REPO_NAME}-conanfile.txt
+        echo "cmake/3.27.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        echo "ninja/1.11.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        
+        # Add generator
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[generators]" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeDeps" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeToolchain" >> ${REPO_NAME}-conanfile.txt
+
+    - name: Get repository name
+      id: repo-name
+      run: echo "REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_OUTPUT
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.repo-name.outputs.REPO_NAME }}-package-manager-deps
+        path: |
+          ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
+          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt
+          dependency_info/ 

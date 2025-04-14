@@ -306,21 +306,21 @@ jobs:
         done
         echo '```' >> ${REPO_NAME}-dependency-report.md
 
-    - name: Run OSV Scanner
-      run: |
-        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+    # - name: Run OSV Scanner
+    #   run: |
+    #     REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
         
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "### OSV Version Detection" >> ${REPO_NAME}-dependency-report.md
-        echo '```' >> ${REPO_NAME}-dependency-report.md
-        python3 -m pip install --user osv 2>/dev/null || echo "Could not install OSV scanner" >> ${REPO_NAME}-dependency-report.md
-        if command -v osv-scanner &> /dev/null; then
-          echo "Running OSV scanner to detect vendored package versions..." >> ${REPO_NAME}-dependency-report.md
-          osv-scanner scan --recursive . >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "OSV scanner failed or found no results" >> ${REPO_NAME}-dependency-report.md
-        else
-          echo "OSV scanner not available. Could not scan for vendored package versions." >> ${REPO_NAME}-dependency-report.md
-        fi
-        echo '```' >> ${REPO_NAME}-dependency-report.md
+    #     echo "" >> ${REPO_NAME}-dependency-report.md
+    #     echo "### OSV Version Detection" >> ${REPO_NAME}-dependency-report.md
+    #     echo '```' >> ${REPO_NAME}-dependency-report.md
+    #     python3 -m pip install --user osv 2>/dev/null || echo "Could not install OSV scanner" >> ${REPO_NAME}-dependency-report.md
+    #     if command -v osv-scanner &> /dev/null; then
+    #       echo "Running OSV scanner to detect vendored package versions..." >> ${REPO_NAME}-dependency-report.md
+    #       osv-scanner scan --recursive . >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "OSV scanner failed or found no results" >> ${REPO_NAME}-dependency-report.md
+    #     else
+    #       echo "OSV scanner not available. Could not scan for vendored package versions." >> ${REPO_NAME}-dependency-report.md
+    #     fi
+    #     echo '```' >> ${REPO_NAME}-dependency-report.md
 
     - name: Analyze CMake Dependencies
       run: |

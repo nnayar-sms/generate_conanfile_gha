@@ -1,0 +1,187 @@
+name: Generate Git & Vendor Dependencies Report
+
+on:
+  workflow_call:
+
+jobs:
+  analyze_dependencies:
+    name: Analyze Git & Vendor Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Initialize Dependency Report
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "# Dependency Report" > ${REPO_NAME}-dependency-report.md
+        echo "Generated on $(date)" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        
+        # Create directory to store detailed dependency information
+        mkdir -p dependency_info
+
+    - name: Analyze Git Submodules
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Git Submodules" >> ${REPO_NAME}-dependency-report.md
+        if [ -f ".gitmodules" ]; then
+          echo "### Detected Git Submodules" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          cat .gitmodules >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Submodule Versions (Commit Hashes)" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          git submodule status >> ${REPO_NAME}-dependency-report.md 2>/dev/null || echo "Could not get submodule status" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          echo "" >> ${REPO_NAME}-dependency-report.md
+          echo "### Detailed Submodule Information" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          git submodule foreach 'echo "Submodule: $name"; git log -n 1 --pretty=format:"%h %s %ad" --date=short; echo ""; if [ -f "VERSION" ]; then echo "VERSION file: $(cat VERSION)"; fi; if [ -f "version.txt" ]; then echo "version.txt: $(cat version.txt)"; fi; echo ""' 2>/dev/null || echo "Could not get detailed submodule info" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+        else
+          echo "No .gitmodules file found. Repository does not use git submodules." >> ${REPO_NAME}-dependency-report.md
+        fi
+
+    - name: Analyze Vendored Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Vendored Dependencies" >> ${REPO_NAME}-dependency-report.md
+        
+        echo "### Common Vendored Directories" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
+          if [ -d "$DIR" ]; then
+            echo "Found potential vendored directory: $DIR" >> ${REPO_NAME}-dependency-report.md
+            echo "Contents:" >> ${REPO_NAME}-dependency-report.md
+            ls -la "$DIR" >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
+    - name: Generate Conanfile for Git & Vendor Dependencies
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        # Create conanfile.txt
+        echo "[requires]" > ${REPO_NAME}-conanfile.txt
+        
+        # Function to get version from commit hash
+        get_version_from_commit() {
+          local commit_hash=$1
+          local dep_name=$2
+          local subdir=$3
+          
+          # 1. Try to find a tag pointing to this commit
+          local tag=$(git tag --points-at $commit_hash | grep -E "^v?[0-9]+\.[0-9]+(\.[0-9]+)?$" | head -n 1)
+          
+          if [ ! -z "$tag" ]; then
+            # Clean up the tag to get just the version number
+            local version=$(echo $tag | sed 's/^v//')
+            echo "${dep_name}/${version} # Version from git tag" >> ${REPO_NAME}-conanfile.txt
+            return
+          fi
+          
+          # 2. Try to find the closest tag
+          local closest_tag=$(git describe --tags --abbrev=0 $commit_hash 2>/dev/null)
+          if [ ! -z "$closest_tag" ]; then
+            local version=$(echo $closest_tag | sed 's/^v//')
+            echo "${dep_name}/${version} # Version from closest git tag" >> ${REPO_NAME}-conanfile.txt
+            return
+          fi
+          
+          # 3. Check for version in VERSION or version.txt files
+          for ver_file in "$subdir/VERSION" "$subdir/version.txt" "$subdir/Version.txt"; do
+            if [ -f "$ver_file" ]; then
+              local version=$(grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' "$ver_file" | head -n 1)
+              if [ ! -z "$version" ]; then
+                echo "${dep_name}/${version} # Version from version file" >> ${REPO_NAME}-conanfile.txt
+                return
+              fi
+            fi
+          done
+          
+          # 4. Check for version in header files
+          for header in $(find "$subdir" -type f -name "*.h" -o -name "*.hpp" | head -n 5); do
+            local version=$(grep -E "#define.*VERSION|VERSION.*[0-9]" "$header" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+            if [ ! -z "$version" ]; then
+              echo "${dep_name}/${version} # Version from header file" >> ${REPO_NAME}-conanfile.txt
+              return
+            fi
+          done
+          
+          # 5. If all else fails, use the commit hash
+          echo "${dep_name}/${commit_hash} # Version determined via Git commit hash" >> ${REPO_NAME}-conanfile.txt
+        }
+
+        # Process git submodules
+        if [ -f ".gitmodules" ]; then
+          echo "# Git Submodule Dependencies" >> ${REPO_NAME}-conanfile.txt
+          git submodule foreach 'echo "Processing $name..."; COMMIT_HASH=$(git rev-parse HEAD); get_version_from_commit "$COMMIT_HASH" "$name" "$toplevel/$path"' 2>/dev/null || true
+        fi
+
+        # Process vendored dependencies
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "# Vendored Dependencies" >> ${REPO_NAME}-conanfile.txt
+        for DIR in vendor third_party external lib/vendor deps dependencies ext contrib ThirdParty llvm/utils llvm/lib third-party runtimes; do
+          if [ -d "$DIR" ]; then
+            for SUBDIR in $(find "$DIR" -maxdepth 1 -type d | grep -v "^$DIR$"); do
+              DEP_NAME=$(basename "$SUBDIR")
+              # Skip common non-dependency directories
+              if [[ "$DEP_NAME" != "CMakeFiles" && \
+                    "$DEP_NAME" != "include" && \
+                    "$DEP_NAME" != "src" && \
+                    "$DEP_NAME" != "test" && \
+                    "$DEP_NAME" != "tests" && \
+                    "$DEP_NAME" != "utils" && \
+                    "$DEP_NAME" != "lib" && \
+                    "$DEP_NAME" != "tools" && \
+                    "$DEP_NAME" != "docs" && \
+                    "$DEP_NAME" != "examples" ]]; then
+                # Get the latest commit hash for this directory
+                COMMIT_HASH=$(git log -n 1 --pretty=format:"%H" -- "$SUBDIR" 2>/dev/null)
+                if [ ! -z "$COMMIT_HASH" ]; then
+                  get_version_from_commit "$COMMIT_HASH" "$DEP_NAME" "$SUBDIR"
+                fi
+              fi
+            done
+          fi
+        done
+
+        # Add build requirements
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[build_requires]" >> ${REPO_NAME}-conanfile.txt
+        echo "cmake/3.27.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        echo "ninja/1.11.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        
+        # Add generator
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[generators]" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeDeps" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeToolchain" >> ${REPO_NAME}-conanfile.txt
+
+    - name: Get repository name
+      id: repo-name
+      run: echo "REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_OUTPUT
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.repo-name.outputs.REPO_NAME }}-git-vendor-deps
+        path: |
+          ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
+          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt 

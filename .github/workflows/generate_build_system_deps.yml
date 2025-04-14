@@ -1,0 +1,168 @@
+name: Generate Build System Dependencies Report
+
+on:
+  workflow_call:
+
+jobs:
+  analyze_dependencies:
+    name: Analyze Build System Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Initialize Dependency Report
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "# Dependency Report" > ${REPO_NAME}-dependency-report.md
+        echo "Generated on $(date)" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        
+        # Create directory to store detailed dependency information
+        mkdir -p dependency_info
+
+    - name: Analyze CMake Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
+        CMAKE_FILES=$(find . -name "CMakeLists.txt" -not -path "*/build/*" -not -path "*/\.*")
+        if [ ! -z "$CMAKE_FILES" ]; then
+          echo "### Direct CMake Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          for CMAKE_FILE in $CMAKE_FILES; do
+            echo "File: $CMAKE_FILE" >> ${REPO_NAME}-dependency-report.md
+            {
+              grep -n "find_package" "$CMAKE_FILE" || echo "No find_package found"
+              grep -n "pkg_check_modules" "$CMAKE_FILE" || echo "No pkg_check_modules found"
+            } >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+          done
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          
+          if [ -f "build/CMakeCache.txt" ]; then
+            echo "" >> ${REPO_NAME}-dependency-report.md
+            echo "### CMake Cache - Dependency Versions" >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            grep -E "_VERSION|_FOUND" build/CMakeCache.txt | sort >> ${REPO_NAME}-dependency-report.md
+            echo '```' >> ${REPO_NAME}-dependency-report.md
+            
+            cp build/CMakeCache.txt dependency_info/
+            [ -f build/compile_commands.json ] && cp build/compile_commands.json dependency_info/
+          fi
+        else
+          echo "No CMakeLists.txt files found in the project." >> ${REPO_NAME}-dependency-report.md
+        fi
+
+    - name: Analyze Autotools Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Autotools Dependencies" >> ${REPO_NAME}-dependency-report.md
+        
+        if [ -f "configure.ac" ] || [ -f "configure.in" ]; then
+          echo "### Configure Script Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          for conf_file in configure.ac configure.in; do
+            if [ -f "$conf_file" ]; then
+              echo "File: $conf_file" >> ${REPO_NAME}-dependency-report.md
+              grep -E "AC_CHECK_LIB|AC_SEARCH_LIBS|PKG_CHECK_MODULES" "$conf_file" >> ${REPO_NAME}-dependency-report.md
+              echo "" >> ${REPO_NAME}-dependency-report.md
+            fi
+          done
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+        fi
+
+    - name: Analyze Make Dependencies
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Make Dependencies" >> ${REPO_NAME}-dependency-report.md
+        
+        MAKE_FILES=$(find . -name "Makefile" -o -name "makefile" -o -name "GNUmakefile" -not -path "*/build/*" -not -path "*/\.*")
+        if [ ! -z "$MAKE_FILES" ]; then
+          echo "### Makefile Dependencies" >> ${REPO_NAME}-dependency-report.md
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+          for MAKE_FILE in $MAKE_FILES; do
+            echo "File: $MAKE_FILE" >> ${REPO_NAME}-dependency-report.md
+            grep -E "LIBS|LDFLAGS|CPPFLAGS|PKG_CONFIG" "$MAKE_FILE" >> ${REPO_NAME}-dependency-report.md
+            echo "" >> ${REPO_NAME}-dependency-report.md
+          done
+          echo '```' >> ${REPO_NAME}-dependency-report.md
+        fi
+
+    - name: Generate Conanfile for Build System Dependencies
+      run: |
+        # Get repository name
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        # Create conanfile.txt
+        echo "[requires]" > ${REPO_NAME}-conanfile.txt
+        
+        # Process CMake dependencies
+        if [ -f "build/CMakeCache.txt" ]; then
+          echo "# CMake Dependencies" >> ${REPO_NAME}-conanfile.txt
+          grep -E "_VERSION" build/CMakeCache.txt | while read -r line; do
+            PKG=$(echo "$line" | cut -d: -f1 | sed 's/_VERSION$//' | tr '[:upper:]' '[:lower:]')
+            VERSION=$(echo "$line" | cut -d= -f2 | tr -d '"')
+            echo "${PKG}/${VERSION} # From CMake cache" >> ${REPO_NAME}-conanfile.txt
+          done
+        fi
+        
+        # Process Autotools dependencies
+        for conf_file in configure.ac configure.in; do
+          if [ -f "$conf_file" ]; then
+            echo "" >> ${REPO_NAME}-conanfile.txt
+            echo "# Autotools Dependencies" >> ${REPO_NAME}-conanfile.txt
+            grep -E "PKG_CHECK_MODULES" "$conf_file" | while read -r line; do
+              PKG=$(echo "$line" | grep -oE '\[[^]]+\]' | tr -d '[]')
+              echo "${PKG}/latest # From configure.ac" >> ${REPO_NAME}-conanfile.txt
+            done
+          fi
+        done
+        
+        # Process Make dependencies
+        MAKE_FILES=$(find . -name "Makefile" -o -name "makefile" -o -name "GNUmakefile" -not -path "*/build/*" -not -path "*/\.*")
+        if [ ! -z "$MAKE_FILES" ]; then
+          echo "" >> ${REPO_NAME}-conanfile.txt
+          echo "# Make Dependencies" >> ${REPO_NAME}-conanfile.txt
+          for MAKE_FILE in $MAKE_FILES; do
+            grep -E "PKG_CONFIG" "$MAKE_FILE" | while read -r line; do
+              PKG=$(echo "$line" | grep -oE '--libs[^ ]+' | cut -d= -f2)
+              echo "${PKG}/latest # From Makefile" >> ${REPO_NAME}-conanfile.txt
+            done
+          done
+        fi
+        
+        # Add build requirements
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[build_requires]" >> ${REPO_NAME}-conanfile.txt
+        echo "cmake/3.27.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        echo "ninja/1.11.1 # Fixed version for build system" >> ${REPO_NAME}-conanfile.txt
+        
+        # Add generator
+        echo "" >> ${REPO_NAME}-conanfile.txt
+        echo "[generators]" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeDeps" >> ${REPO_NAME}-conanfile.txt
+        echo "CMakeToolchain" >> ${REPO_NAME}-conanfile.txt
+
+    - name: Get repository name
+      id: repo-name
+      run: echo "REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_OUTPUT
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.repo-name.outputs.REPO_NAME }}-build-system-deps
+        path: |
+          ${{ steps.repo-name.outputs.REPO_NAME }}-dependency-report.md
+          ${{ steps.repo-name.outputs.REPO_NAME }}-conanfile.txt
+          dependency_info/ 
