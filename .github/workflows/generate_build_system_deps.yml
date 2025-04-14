@@ -82,22 +82,32 @@ jobs:
 
     - name: Analyze Make Dependencies
       run: |
+        set -e
         REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
         
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "## Make Dependencies" >> ${REPO_NAME}-dependency-report.md
+        echo "" >> "${REPO_NAME}-dependency-report.md"
+        echo "## Make Dependencies" >> "${REPO_NAME}-dependency-report.md"
         
-        MAKE_FILES=$(find . -name "Makefile" -o -name "makefile" -o -name "GNUmakefile" -not -path "*/build/*" -not -path "*/\.*")
-        if [ ! -z "$MAKE_FILES" ]; then
-          echo "### Makefile Dependencies" >> ${REPO_NAME}-dependency-report.md
-          echo '```' >> ${REPO_NAME}-dependency-report.md
-          for MAKE_FILE in $MAKE_FILES; do
-            echo "File: $MAKE_FILE" >> ${REPO_NAME}-dependency-report.md
-            grep -E "LIBS|LDFLAGS|CPPFLAGS|PKG_CONFIG" "$MAKE_FILE" >> ${REPO_NAME}-dependency-report.md
-            echo "" >> ${REPO_NAME}-dependency-report.md
-          done
-          echo '```' >> ${REPO_NAME}-dependency-report.md
+        # Find Makefiles and store in a temporary file
+        find . -name "Makefile" -o -name "makefile" -o -name "GNUmakefile" -not -path "*/build/*" -not -path "*/\.*" > makefiles.tmp
+        
+        if [ -s makefiles.tmp ]; then
+          echo "### Makefile Dependencies" >> "${REPO_NAME}-dependency-report.md"
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+          while IFS= read -r MAKE_FILE; do
+            echo "File: $MAKE_FILE" >> "${REPO_NAME}-dependency-report.md"
+            if [ -f "$MAKE_FILE" ]; then
+              grep -E "LIBS|LDFLAGS|CPPFLAGS|PKG_CONFIG" "$MAKE_FILE" >> "${REPO_NAME}-dependency-report.md" || true
+            fi
+            echo "" >> "${REPO_NAME}-dependency-report.md"
+          done < makefiles.tmp
+          echo '```' >> "${REPO_NAME}-dependency-report.md"
+        else
+          echo "No Makefiles found in the project." >> "${REPO_NAME}-dependency-report.md"
         fi
+        
+        # Clean up
+        rm -f makefiles.tmp
 
     - name: Generate Conanfile for Build System Dependencies
       run: |
