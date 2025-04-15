@@ -274,6 +274,20 @@ jobs:
         done
         echo '```' >> ${REPO_NAME}-dependency-report.md
 
+    - name: Check documentation for dependency information
+      run: |
+        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+        
+        echo "" >> ${REPO_NAME}-dependency-report.md
+        echo "## Documentation Analysis" >> ${REPO_NAME}-dependency-report.md
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+        for doc_file in README.md INSTALL.md docs/*.md; do
+          if [ -f "$doc_file" ]; then
+            # Extract dependency information from documentation
+          fi
+        done
+        echo '```' >> ${REPO_NAME}-dependency-report.md
+
     - name: Generate dependency graph
       run: |
         REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
@@ -286,33 +300,5 @@ jobs:
           # Generate dependency graph
           # Check for nested dependencies
           # Verify dependency versions
-        done
-        echo '```' >> ${REPO_NAME}-dependency-report.md
-
-    - name: Add security checks
-      run: |
-        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
-        
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "## Security Analysis" >> ${REPO_NAME}-dependency-report.md
-        echo '```' >> ${REPO_NAME}-dependency-report.md
-        for dep_dir in $(find . -type d -name "*vendor*" -o -name "*third*party*"); do
-          # Check for known vulnerabilities
-          # Verify checksums
-          # Check for outdated dependencies
-        done
-        echo '```' >> ${REPO_NAME}-dependency-report.md
-
-    - name: Check documentation for dependency information
-      run: |
-        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
-        
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "## Documentation Analysis" >> ${REPO_NAME}-dependency-report.md
-        echo '```' >> ${REPO_NAME}-dependency-report.md
-        for doc_file in README.md INSTALL.md docs/*.md; do
-          if [ -f "$doc_file" ]; then
-            # Extract dependency information from documentation
-          fi
         done
         echo '```' >> ${REPO_NAME}-dependency-report.md 
