@@ -274,19 +274,19 @@ jobs:
         done
         echo '```' >> ${REPO_NAME}-dependency-report.md
 
-    - name: Check documentation for dependency information
-      run: |
-        REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
+    # - name: Check documentation for dependency information
+    #   run: |
+    #     REPO_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')
         
-        echo "" >> ${REPO_NAME}-dependency-report.md
-        echo "## Documentation Analysis" >> ${REPO_NAME}-dependency-report.md
-        echo '```' >> ${REPO_NAME}-dependency-report.md
-        for doc_file in README.md INSTALL.md docs/*.md; do
-          if [ -f "$doc_file" ]; then
-            # Extract dependency information from documentation
-          fi
-        done
-        echo '```' >> ${REPO_NAME}-dependency-report.md
+    #     echo "" >> ${REPO_NAME}-dependency-report.md
+    #     echo "## Documentation Analysis" >> ${REPO_NAME}-dependency-report.md
+    #     echo '```' >> ${REPO_NAME}-dependency-report.md
+    #     for doc_file in README.md INSTALL.md docs/*.md; do
+    #       if [ -f "$doc_file" ]; then
+    #         # Extract dependency information from documentation
+    #       fi
+    #     done
+    #     echo '```' >> ${REPO_NAME}-dependency-report.md
 
     - name: Generate dependency graph
       run: |
